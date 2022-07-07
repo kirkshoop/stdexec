@@ -100,11 +100,13 @@ set(test_sourceFiles
     test/concepts/test_concepts_receiver.cpp
     test/concepts/test_concept_operation_state.cpp
     test/concepts/test_concepts_sender.cpp
+    test/concepts/test_concept_sequence_sender.cpp
     test/types/test_type_async_scope.cpp
     test/algos/factories/test_just.cpp
     test/algos/factories/test_transfer_just.cpp
     test/algos/factories/test_just_error.cpp
     test/algos/factories/test_just_stopped.cpp
+    test/algos/factories/test_iotas.cpp
     test/algos/adaptors/test_on.cpp
     test/algos/adaptors/test_transfer.cpp
     test/algos/adaptors/test_schedule_from.cpp

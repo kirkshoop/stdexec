@@ -45,10 +45,10 @@ namespace std::execution::P0TBD {
 #if 0
       template <class _Awaitable, class _Receiver>
         requires (!__sequence_connectable_sender_with<_Awaitable, _Receiver>) &&
-          __callable<__connect_awaitable_t, _Awaitable, _Receiver>
+          __callable<__sequence_connect_awaitable_t, _Awaitable, _Receiver>
       auto operator()(_Awaitable&& __await, _Receiver&& __rcvr) const
-        -> __connect_awaitable_::__operation_t<_Receiver> {
-        return __connect_awaitable((_Awaitable&&) __await, (_Receiver&&) __rcvr);
+        -> __sequence_connect_awaitable::__operation_t<_Receiver> {
+        return __sequence_connect_awaitable((_Awaitable&&) __await, (_Receiver&&) __rcvr);
       }
 #endif
 #if 0
@@ -56,7 +56,7 @@ namespace std::execution::P0TBD {
       // sender will not connect. Use the __debug_sender function below.
       template <class _Sender, class _Receiver>
         requires (!__sequence_connectable_sender_with<_Sender, _Receiver>) &&
-           (!__callable<__connect_awaitable_t, _Sender, _Receiver>) &&
+           (!__callable<__sequence_connect_awaitable_t, _Sender, _Receiver>) &&
            tag_invocable<__is_debug_env_t, env_of_t<_Receiver>>
       auto operator()(_Sender&& __sndr, _Receiver&& __rcvr) const
         -> __debug_op_state {
@@ -73,92 +73,199 @@ namespace std::execution::P0TBD {
   using __sequence_connect::sequence_connect_t;
   inline constexpr __sequence_connect::sequence_connect_t sequence_connect {};
 
+  template <class _Sender, class _Receiver, class _ValueAdaptor>
+    using sequence_connect_result_t = __call_result_t<sequence_connect_t, _Sender, _Receiver, _ValueAdaptor>;
+
+  template <class _Sender, class _Receiver, class _ValueAdaptor>
+    concept __has_nothrow_sequence_connect =
+      noexcept(connect(__declval<_Sender>(), __declval<_Receiver>(), __declval<_ValueAdaptor>()));
+
+  // using __connect::__debug_sequence_sender;
+
+  template <class _SequenceSender, class _Env>
+    concept __sequence_sender =
+      requires (_SequenceSender&& __seq_sndr, _Env&& __env) {
+        { get_completion_signatures((_SequenceSender&&) __seq_sndr, (_Env&&) __env) } ->
+          __valid_completion_signatures<_Env>;
+      };
+
+  template <class _SequenceSender, class _Env = no_env>
+    concept sequence_sender =
+      __sender<_SequenceSender, _Env> &&
+      __sender<_SequenceSender, no_env> &&
+      move_constructible<remove_cvref_t<_SequenceSender>>;
+
+  /////////////////////////////////////////////////////////////////////////////
+  // [exec.snd]
+    template <class...>
+      using __remove_value_t = completion_signatures<>;
+
+    template<class _SequenceSender, class _Receiver>
+    using __seq_compl_sigs_t =
+      make_completion_signatures<
+        _SequenceSender,
+        env_of_t<_Receiver>,
+        completion_signatures<set_value_t()>,
+        __remove_value_t>;
+
+  template <class _SequenceSender, class _Receiver, class _ValueAdaptor>
+    concept sequence_sender_to =
+      sequence_sender<_SequenceSender, env_of_t<_Receiver>> &&
+      receiver_of<_Receiver, __seq_compl_sigs_t<_SequenceSender, _Receiver>> &&
+      requires (_SequenceSender&& __seq_sndr, _Receiver&& __rcvr, _ValueAdaptor&& __value_adapt) {
+        sequence_connect((_SequenceSender&&) __seq_sndr, (_Receiver&&) __rcvr, (_ValueAdaptor&&) __value_adapt);
+      };
+
     /////////////////////////////////////////////////////////////////////////////
   // [execution.senders.factories]
-  namespace __itos {
+  namespace __iotas {
 
-    template <class _CPO, class... _Ts>
-    using __completion_signatures_ = completion_signatures<_CPO(_Ts...)>;
+    template <class _CPO, class _V>
+    using __completion_signatures_ = completion_signatures<_CPO(_V)>;
 
-    template <class _CPO, class... _Ts>
+    template <class _CPO, class _V>
     struct __value_sender {
-        using completion_signatures = __completion_signatures_<_CPO, _Ts...>;
+        using completion_signatures = __completion_signatures_<_CPO, _V>;
 
-        template <class _ReceiverId, class _ValueAdapterId>
+        template <class _ReceiverId>
           struct __operation : __immovable {
             using _Receiver = __t<_ReceiverId>;
-            using _ValueAdapter = __t<_ValueAdapterId>;
-            tuple<_Ts...> __vals_;
             _Receiver __rcvr_;
-            _ValueAdapter __adapt_;
+            _V __last_;
 
             friend void tag_invoke(start_t, __operation& __op_state) noexcept {
-              static_assert(__nothrow_callable<_CPO, _Receiver, _Ts...>);
-              std::apply([&__op_state](_Ts&... __ts) {
-                _CPO{}((_Receiver&&) __op_state.__rcvr_, (_Ts&&) __ts...);
-              }, __op_state.__vals_);
+              static_assert(__nothrow_callable<_CPO, _Receiver, _V>);
+              _CPO{}(std::move(__op_state.__rcvr_), std::move(__op_state.__last_));
             }
           };
 
-        template <class _Receiver, class _ValueAdapter>
-          requires (copy_constructible<_Ts> &&...)
-        friend auto tag_invoke(sequence_connect_t, const __value_sender& __sndr, _Receiver&& __rcvr, const _ValueAdapter& __adapt)
-          noexcept((is_nothrow_copy_constructible_v<_Ts> &&...))
-          -> __operation<__x<remove_cvref_t<_Receiver>>, __x<remove_cvref_t<_ValueAdapter>>> {
-          return {{}, __sndr.__vals_, (_Receiver&&) __rcvr, (_ValueAdapter&&) __adapt};
-        }
+        _V __last_;
 
         template <class _Receiver, class _ValueAdapter>
-        friend auto tag_invoke(sequence_connect_t, __value_sender&& __sndr, _Receiver&& __rcvr, _ValueAdapter&& __adapt)
-          noexcept((is_nothrow_move_constructible_v<_Ts> &&...))
-          -> __operation<__x<remove_cvref_t<_Receiver>>, __x<remove_cvref_t<_ValueAdapter>>> {
-          return {{}, ((__value_sender&&) __sndr).__vals_, (_Receiver&&) __rcvr, (_ValueAdapter&&) __adapt};
+          requires (copy_constructible<_V>)
+        friend auto tag_invoke(connect_t, const __value_sender& __sndr, _Receiver&& __rcvr, const _ValueAdapter& __adapt)
+          noexcept(is_nothrow_copy_constructible_v<_V>)
+          -> __operation<__x<remove_cvref_t<_Receiver>>> {
+          return {{}, (_Receiver&&) __rcvr, ((__value_sender&&) __sndr).__last_};
+        }
+
+        template <class _Receiver>
+        friend auto tag_invoke(connect_t, __value_sender&& __sndr, _Receiver&& __rcvr)
+          noexcept(is_nothrow_move_constructible_v<_V>)
+          -> __operation<__x<remove_cvref_t<_Receiver>>> {
+          return {{}, (_Receiver&&) __rcvr, ((__value_sender&&) __sndr).__last_};
         }
     };
 
-    template <class _CPO>
+    template <class _CPO, class _V, class _B>
       struct __sender {
-        using completion_signatures = __completion_signatures_<_CPO()>;
-        template <class _ReceiverId, class _ValueAdapterId>
+        using completion_signatures = __completion_signatures_<_CPO, _V>;
+        template <class _ReceiverId, class _ValueAdaptorId>
           struct __operation : __immovable {
             using _Receiver = __t<_ReceiverId>;
-            using _ValueAdapter = __t<_ValueAdapterId>;
+            using _ValueAdaptor = __t<_ValueAdaptorId>;
+
+            struct __value_receiver {
+                __operation* __op_state_;
+
+                template<class... _Args>
+                friend void tag_invoke(set_value_t, __value_receiver&& __value_rcvr, _Args&&...) noexcept try {
+                    auto __op_state = ((__value_receiver&&) __value_rcvr).__op_state_;
+                    auto& __value_op = __op_state->__value_op_;
+                    __value_op.reset();
+                    if (__op_state->__bound_ == __op_state->__next_) {
+                      execution::set_value(std::move(__op_state->__rcvr_));
+                      return;
+                    }
+                    auto __adapted_value{__op_state->__adapt_(__value_sender<_CPO, _V>{__op_state->__next_++})};
+                    __value_op.emplace(
+                        __conv{
+                            [&](){
+                                return execution::connect(std::move(__adapted_value), __value_receiver{__op_state});
+                            }
+                        });
+                    auto __start_id = __op_state->__start_id_;
+                    if (std::thread::id{} == __start_id || __start_id != std::this_thread::get_id()) {
+                      execution::start(*__value_op);
+                    }
+                } catch(...) {
+                    execution::set_error(
+                        (_Receiver&&) ((__value_receiver&&) __value_rcvr).__op_state_->__rcvr_,
+                        current_exception());
+                }
+
+                template <__one_of<set_error_t, set_stopped_t> _Tag, class... _Args>
+                  requires __callable<_Tag, _Receiver, _Args...>
+                friend void tag_invoke(_Tag, __value_receiver&& __value_rcvr, _Args&&... __args) noexcept {
+                  auto __op_state = ((__value_receiver&&) __value_rcvr).__op_state_;
+                  __op_state->__value_op_.reset();
+                  _Tag{}((_Receiver&&) __op_state->__rcvr_, (_Args&&) __args...);
+                }
+
+                friend auto tag_invoke(get_env_t, const __value_receiver& __value_rcvr)
+                  -> env_of_t<_Receiver> {
+                  return get_env(__value_rcvr.__op_state_->__rcvr_);
+                }
+            };
+
             _Receiver __rcvr_;
-            _ValueAdapter __adapt_;
+            _ValueAdaptor __adapt_;
+            [[no_unique_address]] _V __next_;
+            [[no_unique_address]] _B __bound_;
+
+            using __value_sender_t=invoke_result_t<_ValueAdaptor, __value_sender<_CPO, _V>>;
+            using __value_op_t=connect_result_t<__value_sender_t, __value_receiver>;
+            optional<__value_op_t> __value_op_;
+            std::thread::id __start_id_;
 
             friend void tag_invoke(start_t, __operation& __op_state) noexcept {
-              static_assert(__nothrow_callable<_CPO, _Receiver, _Ts...>);
-              std::apply([&__op_state](_Ts&... __ts) {
-                _CPO{}((_Receiver&&) __op_state.__rcvr_, (_Ts&&) __ts...);
-              }, __op_state.__vals_);
+              static_assert(__nothrow_callable<_CPO, _Receiver, _V>);
+              if (__op_state.__bound_ == __op_state.__next_) {
+                execution::set_value(std::move(__op_state.__rcvr_));
+                return;
+              }
+              auto __adapted_value{__op_state.__adapt_(__value_sender<_CPO, _V>{__op_state.__next_++})};
+              __op_state.__value_op_.emplace(
+                  __conv{
+                      [&](){
+                          return execution::connect(std::move(__adapted_value), __value_receiver{&__op_state});
+                      }
+                  });
+              __op_state.__start_id_ = std::this_thread::get_id();
+              while(!!__op_state.__value_op_) {
+                execution::start(*__op_state.__value_op_);
+              }
+              __op_state.__start_id_ = std::thread::id{};
             }
           };
 
-        template <class _Receiver, class _ValueAdapter>
-          requires (copy_constructible<_Ts> &&...)
-        friend auto tag_invoke(sequence_connect_t, const __sender& __sndr, _Receiver&& __rcvr, const _ValueAdapter& __adapt)
-          noexcept((is_nothrow_copy_constructible_v<_Ts> &&...))
-          -> __operation<__x<remove_cvref_t<_Receiver>>, __x<remove_cvref_t<_ValueAdapter>>> {
-          return {{}, __sndr.__vals_, (_Receiver&&) __rcvr, (_ValueAdapter&&) __adapt};
+        [[no_unique_address]] _V __value_;
+        [[no_unique_address]] _B __bound_;
+
+        template <class _Receiver, class _ValueAdaptor>
+        friend auto tag_invoke(sequence_connect_t, const __sender& __sndr, _Receiver&& __rcvr, const _ValueAdaptor& __adapt)
+          noexcept(is_nothrow_copy_constructible_v<_V> && is_nothrow_copy_constructible_v<_B>)
+          -> __operation<__x<remove_cvref_t<_Receiver>>, __x<remove_cvref_t<_ValueAdaptor>>> {
+          return {{}, (_Receiver&&) __rcvr, (_ValueAdaptor&&) __adapt, ((__sender&&) __sndr).__value_, ((__sender&&) __sndr).__bound_};
         }
 
         template <class _Receiver, class _ValueAdapter>
         friend auto tag_invoke(sequence_connect_t, __sender&& __sndr, _Receiver&& __rcvr, _ValueAdapter&& __adapt)
-          noexcept((is_nothrow_move_constructible_v<_Ts> &&...))
+          noexcept(is_nothrow_copy_constructible_v<_V> && is_nothrow_copy_constructible_v<_B>)
           -> __operation<__x<remove_cvref_t<_Receiver>>, __x<remove_cvref_t<_ValueAdapter>>> {
-          return {{}, ((__sender&&) __sndr).__vals_, (_Receiver&&) __rcvr, (_ValueAdapter&&) __adapt};
+          return {{}, (_Receiver&&) __rcvr, (_ValueAdapter&&) __adapt, ((__sender&&) __sndr).__value_, ((__sender&&) __sndr).__bound_};
         }
       };
 
-    inline constexpr struct __itos_t {
-      template <__movable_value... _Ts>
-      __sender<set_value_t, decay_t<_Ts>...> operator()(_Ts&&... __ts) const
-        noexcept((is_nothrow_constructible_v<decay_t<_Ts>, _Ts> &&...)) {
-        return {{(_Ts&&) __ts...}};
+    inline constexpr struct __iotas_t {
+      template <copy_constructible _V, __equality_comparable_with<_V> _B>
+      __sender<set_value_t, decay_t<_V>, decay_t<_B>> operator()(_V&& __v, _B&& __b) const
+        noexcept(is_nothrow_constructible_v<decay_t<_V>, _V> && is_nothrow_constructible_v<decay_t<_B>, _B>) {
+        return {(_V&&) __v, (_B&&) __b};
       }
-    } itos {};
+    } iotas {};
   }
-  using __itos::itos;
+  using __iotas::iotas;
 
   /////////////////////////////////////////////////////////////////////////////
   // [execution.senders.adaptors.ignore_all]
