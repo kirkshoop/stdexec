@@ -320,7 +320,7 @@ namespace std::execution::P0TBD {
 
       template <sender _SequenceSender>
         requires __tag_invocable_with_completion_scheduler<ignore_all_t, set_value_t, _SequenceSender>
-      sender auto operator()(_SequenceSender&& __seq_sndr) const
+      sequence_sender auto operator()(_SequenceSender&& __seq_sndr) const
         noexcept(nothrow_tag_invocable<ignore_all_t, __completion_scheduler_for<_SequenceSender, set_value_t>, _SequenceSender>) {
         auto __sched = get_completion_scheduler<set_value_t>(__seq_sndr);
         return tag_invoke(ignore_all_t{}, std::move(__sched), (_SequenceSender&&) __seq_sndr);
@@ -328,7 +328,7 @@ namespace std::execution::P0TBD {
       template <sender _SequenceSender>
         requires (!__tag_invocable_with_completion_scheduler<ignore_all_t, set_value_t, _SequenceSender>) &&
           tag_invocable<ignore_all_t, _SequenceSender>
-      sender auto operator()(_SequenceSender&& __seq_sndr) const
+      sequence_sender auto operator()(_SequenceSender&& __seq_sndr) const
         noexcept(nothrow_tag_invocable<ignore_all_t, _SequenceSender>) {
         return tag_invoke(ignore_all_t{}, (_SequenceSender&&) __seq_sndr);
       }
@@ -336,7 +336,7 @@ namespace std::execution::P0TBD {
         requires
           (!__tag_invocable_with_completion_scheduler<ignore_all_t, set_value_t, _SequenceSender>) &&
           (!tag_invocable<ignore_all_t, _SequenceSender>) &&
-          sender<__sequence_sender<_SequenceSender>>
+          sequence_sender<__sequence_sender<_SequenceSender>>
       __sequence_sender<_SequenceSender> operator()(_SequenceSender&& __seq_sndr) const {
         return __sequence_sender<_SequenceSender>{(_SequenceSender&&) __seq_sndr};
       }
@@ -351,58 +351,26 @@ namespace std::execution::P0TBD {
   /////////////////////////////////////////////////////////////////////////////
   // [execution.senders.adaptors.then_each]
   namespace __then_each {
-    template <class _ReceiverId, class _FunId>
-      class __receiver
-        : receiver_adaptor<__receiver<_ReceiverId, _FunId>, __t<_ReceiverId>> {
-        using _Receiver = __t<_ReceiverId>;
-        using _Fun = __t<_FunId>;
-        friend receiver_adaptor<__receiver, _Receiver>;
-        [[no_unique_address]] _Fun __f_;
-
-        // Customize set_value by invoking the invocable and passing the result
-        // to the base class
-        template <class... _As>
-          requires invocable<_Fun, _As...> &&
-            tag_invocable<set_value_t, _Receiver, invoke_result_t<_Fun, _As...>>
-        void set_value(_As&&... __as) && noexcept try {
-          execution::set_value(
-              ((__receiver&&) *this).base(),
-              std::invoke((_Fun&&) __f_, (_As&&) __as...));
-        } catch(...) {
-          execution::set_error(
-              ((__receiver&&) *this).base(),
-              current_exception());
-        }
-        // Handle the case when the invocable returns void
-        template <class _R2 = _Receiver, class... _As>
-          requires invocable<_Fun, _As...> &&
-            same_as<void, invoke_result_t<_Fun, _As...>> &&
-            tag_invocable<set_value_t, _R2>
-        void set_value(_As&&... __as) && noexcept try {
-          std::invoke((_Fun&&) __f_, (_As&&) __as...);
-          execution::set_value(((__receiver&&) *this).base());
-        } catch(...) {
-          execution::set_error(
-              ((__receiver&&) *this).base(),
-              current_exception());
-        }
-
-       public:
-        explicit __receiver(_Receiver __rcvr, _Fun __fun)
-          : receiver_adaptor<__receiver, _Receiver>((_Receiver&&) __rcvr)
-          , __f_((_Fun&&) __fun)
-        {}
-      };
 
     template <class _SequenceSenderId, class _FunId>
       struct __sequence_sender {
         using _SequenceSender = __t<_SequenceSenderId>;
         using _Fun = __t<_FunId>;
-        template <receiver _Receiver>
-          using __receiver = __receiver<__x<remove_cvref_t<_Receiver>>, _FunId>;
 
         [[no_unique_address]] _SequenceSender __seq_sndr_;
         [[no_unique_address]] _Fun __fun_;
+
+        template<class _ValueAdaptorId>
+        struct __each_adapt {
+          using _ValueAdaptor = __t<_ValueAdaptorId>;
+          [[no_unique_address]] _Fun __fun_;
+          [[no_unique_address]] _ValueAdaptor __value_adapt_;
+          template<class _Sender>
+          auto operator()(_Sender&& __sndr) { return __value_adapt_(execution::then((_Sender&&) __sndr, __fun_)); } //__then_adapt<_ValueAdaptorId>{this})); }
+        };
+
+        template <class _ValueAdaptor>
+          using __each_adapt_t = __each_adapt<__x<remove_cvref_t<_ValueAdaptor>>>;
 
         template <class... _Args>
             requires invocable<_Fun, _Args...>
@@ -417,14 +385,16 @@ namespace std::execution::P0TBD {
             make_completion_signatures<
               __member_t<_Self, _SequenceSender>, _Env, __with_exception_ptr, __set_value>;
 
-        template <__decays_to<__sequence_sender> _Self, receiver _Receiver>
-          requires sender_to<__member_t<_Self, _SequenceSender>, __receiver<_Receiver>>
-        friend auto tag_invoke(connect_t, _Self&& __self, _Receiver&& __rcvr)
-          noexcept(__has_nothrow_connect<__member_t<_Self, _SequenceSender>, __receiver<_Receiver>>)
-          -> connect_result_t<__member_t<_Self, _SequenceSender>, __receiver<_Receiver>> {
-          return execution::connect(
+        template <__decays_to<__sequence_sender> _Self, receiver _Receiver, class _ValueAdaptor>
+          requires sequence_sender_to<__member_t<_Self, _SequenceSender>, _Receiver, __each_adapt_t<_ValueAdaptor>>
+        friend auto tag_invoke(sequence_connect_t, _Self&& __self, _Receiver&& __rcvr, _ValueAdaptor&& __value_adapt)
+          noexcept(__has_nothrow_sequence_connect<__member_t<_Self, _SequenceSender>, _Receiver, __each_adapt_t<_ValueAdaptor>>)
+          // recursive template instantiation
+          {//-> sequence_connect_result_t<__member_t<_Self, _SequenceSender>, _Receiver, __each_adapt_t<_ValueAdaptor>> {
+          return P0TBD::sequence_connect(
               ((_Self&&) __self).__seq_sndr_,
-              __receiver<_Receiver>{(_Receiver&&) __rcvr, ((_Self&&) __self).__fun_});
+              (_Receiver&&) __rcvr,
+              __each_adapt_t<_ValueAdaptor>{((_Self&&) __self).__fun_, (_ValueAdaptor&&) __value_adapt});
         }
 
         template <__decays_to<__sequence_sender> _Self, class _Env>
@@ -447,7 +417,7 @@ namespace std::execution::P0TBD {
 
       template <sender _SequenceSender, __movable_value _Fun>
         requires __tag_invocable_with_completion_scheduler<then_each_t, set_value_t, _SequenceSender, _Fun>
-      sender auto operator()(_SequenceSender&& __seq_sndr, _Fun __fun) const
+      sequence_sender auto operator()(_SequenceSender&& __seq_sndr, _Fun __fun) const
         noexcept(nothrow_tag_invocable<then_each_t, __completion_scheduler_for<_SequenceSender, set_value_t>, _SequenceSender, _Fun>) {
         auto __sched = get_completion_scheduler<set_value_t>(__seq_sndr);
         return tag_invoke(then_each_t{}, std::move(__sched), (_SequenceSender&&) __seq_sndr, (_Fun&&) __fun);
@@ -455,7 +425,7 @@ namespace std::execution::P0TBD {
       template <sender _SequenceSender, __movable_value _Fun>
         requires (!__tag_invocable_with_completion_scheduler<then_each_t, set_value_t, _SequenceSender, _Fun>) &&
           tag_invocable<then_each_t, _SequenceSender, _Fun>
-      sender auto operator()(_SequenceSender&& __seq_sndr, _Fun __fun) const
+      sequence_sender auto operator()(_SequenceSender&& __seq_sndr, _Fun __fun) const
         noexcept(nothrow_tag_invocable<then_each_t, _SequenceSender, _Fun>) {
         return tag_invoke(then_each_t{}, (_SequenceSender&&) __seq_sndr, (_Fun&&) __fun);
       }
@@ -463,7 +433,7 @@ namespace std::execution::P0TBD {
         requires
           (!__tag_invocable_with_completion_scheduler<then_each_t, set_value_t, _SequenceSender, _Fun>) &&
           (!tag_invocable<then_each_t, _SequenceSender, _Fun>) &&
-          sender<__sequence_sender<_SequenceSender, _Fun>>
+          sequence_sender<__sequence_sender<_SequenceSender, _Fun>>
       __sequence_sender<_SequenceSender, _Fun> operator()(_SequenceSender&& __seq_sndr, _Fun __fun) const {
         return __sequence_sender<_SequenceSender, _Fun>{(_SequenceSender&&) __seq_sndr, (_Fun&&) __fun};
       }
