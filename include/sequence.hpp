@@ -270,6 +270,87 @@ namespace std::execution::P0TBD {
   /////////////////////////////////////////////////////////////////////////////
   // [execution.senders.adaptors.ignore_all]
   namespace __ignore_all {
+
+    template <class _SequenceSenderId>
+      struct __sequence_sender {
+        using _SequenceSender = __t<_SequenceSenderId>;
+
+        [[no_unique_address]] _SequenceSender __seq_sndr_;
+
+        struct __identity_value_adapt {
+          template<class _Sender>
+          _Sender operator()(_Sender&& __sndr){ return (_Sender&&) __sndr;}
+        };
+
+        template <__decays_to<__sequence_sender> _Self, receiver _Receiver>
+          requires sequence_sender_to<__member_t<_Self, _SequenceSender>, _Receiver, __identity_value_adapt>
+        friend auto tag_invoke(connect_t, _Self&& __self, _Receiver&& __rcvr)
+          noexcept(__has_nothrow_sequence_connect<__member_t<_Self, _SequenceSender>, _Receiver, __identity_value_adapt>)
+          //recursive template instantiation
+          {//-> sequence_connect_result_t<__member_t<_Self, _SequenceSender>, _Receiver, __identity_value_adapt> {
+          return P0TBD::sequence_connect(((_Self&&) __self).__seq_sndr_, (_Receiver&&) __rcvr, __identity_value_adapt{});
+        }
+
+        template <__decays_to<__sequence_sender> _Self, receiver _Receiver, class _ValueAdaptor>
+          requires sequence_sender_to<__member_t<_Self, _SequenceSender>, _Receiver, __identity_value_adapt>
+        friend auto tag_invoke(sequence_connect_t, _Self&& __self, _Receiver&& __rcvr, _ValueAdaptor&&)
+          noexcept(__has_nothrow_sequence_connect<__member_t<_Self, _SequenceSender>, _Receiver, __identity_value_adapt>)
+          //recursive template instantiation
+          {//-> sequence_connect_result_t<__member_t<_Self, _SequenceSender>, _Receiver, __identity_value_adapt> {
+          return P0TBD::sequence_connect(((_Self&&) __self).__seq_sndr_, (_Receiver&&) __rcvr, __identity_value_adapt{});
+        }
+
+        template <__decays_to<__sequence_sender> _Self, class _Env>
+        friend auto tag_invoke(get_completion_signatures_t, _Self&&, _Env) ->
+          completion_signatures_of_t<_SequenceSender, _Env>;
+
+        // forward sender queries:
+        template <__sender_queries::__sender_query _Tag, class... _As>
+          requires __callable<_Tag, const _SequenceSender&, _As...>
+        friend auto tag_invoke(_Tag __tag, const __sequence_sender& __self, _As&&... __as)
+          noexcept(__nothrow_callable<_Tag, const _SequenceSender&, _As...>)
+          -> __call_result_if_t<__sender_queries::__sender_query<_Tag>, _Tag, const _SequenceSender&, _As...> {
+          return ((_Tag&&) __tag)(__self.__seq_sndr_, (_As&&) __as...);
+        }
+      };
+
+    struct ignore_all_t {
+      template <class _SequenceSender>
+        using __sequence_sender = __sequence_sender<__x<remove_cvref_t<_SequenceSender>>>;
+
+      template <sender _SequenceSender>
+        requires __tag_invocable_with_completion_scheduler<ignore_all_t, set_value_t, _SequenceSender>
+      sender auto operator()(_SequenceSender&& __seq_sndr) const
+        noexcept(nothrow_tag_invocable<ignore_all_t, __completion_scheduler_for<_SequenceSender, set_value_t>, _SequenceSender>) {
+        auto __sched = get_completion_scheduler<set_value_t>(__seq_sndr);
+        return tag_invoke(ignore_all_t{}, std::move(__sched), (_SequenceSender&&) __seq_sndr);
+      }
+      template <sender _SequenceSender>
+        requires (!__tag_invocable_with_completion_scheduler<ignore_all_t, set_value_t, _SequenceSender>) &&
+          tag_invocable<ignore_all_t, _SequenceSender>
+      sender auto operator()(_SequenceSender&& __seq_sndr) const
+        noexcept(nothrow_tag_invocable<ignore_all_t, _SequenceSender>) {
+        return tag_invoke(ignore_all_t{}, (_SequenceSender&&) __seq_sndr);
+      }
+      template <sender _SequenceSender>
+        requires
+          (!__tag_invocable_with_completion_scheduler<ignore_all_t, set_value_t, _SequenceSender>) &&
+          (!tag_invocable<ignore_all_t, _SequenceSender>) &&
+          sender<__sequence_sender<_SequenceSender>>
+      __sequence_sender<_SequenceSender> operator()(_SequenceSender&& __seq_sndr) const {
+        return __sequence_sender<_SequenceSender>{(_SequenceSender&&) __seq_sndr};
+      }
+      __binder_back<ignore_all_t> operator()() const {
+        return {{}, {}};
+      }
+    };
+  }
+  using __ignore_all::ignore_all_t;
+  inline constexpr ignore_all_t ignore_all{};
+
+  /////////////////////////////////////////////////////////////////////////////
+  // [execution.senders.adaptors.then_each]
+  namespace __then_each {
     template <class _ReceiverId, class _FunId>
       class __receiver
         : receiver_adaptor<__receiver<_ReceiverId, _FunId>, __t<_ReceiverId>> {
@@ -313,14 +394,14 @@ namespace std::execution::P0TBD {
         {}
       };
 
-    template <class _SenderId, class _FunId>
-      struct __sender {
-        using _Sender = __t<_SenderId>;
+    template <class _SequenceSenderId, class _FunId>
+      struct __sequence_sender {
+        using _SequenceSender = __t<_SequenceSenderId>;
         using _Fun = __t<_FunId>;
         template <receiver _Receiver>
           using __receiver = __receiver<__x<remove_cvref_t<_Receiver>>, _FunId>;
 
-        [[no_unique_address]] _Sender __sndr_;
+        [[no_unique_address]] _SequenceSender __seq_sndr_;
         [[no_unique_address]] _Fun __fun_;
 
         template <class... _Args>
@@ -334,66 +415,65 @@ namespace std::execution::P0TBD {
         template <class _Self, class _Env>
           using __completion_signatures =
             make_completion_signatures<
-              __member_t<_Self, _Sender>, _Env, __with_exception_ptr, __set_value>;
+              __member_t<_Self, _SequenceSender>, _Env, __with_exception_ptr, __set_value>;
 
-        template <__decays_to<__sender> _Self, receiver _Receiver>
-          requires sender_to<__member_t<_Self, _Sender>, __receiver<_Receiver>>
+        template <__decays_to<__sequence_sender> _Self, receiver _Receiver>
+          requires sender_to<__member_t<_Self, _SequenceSender>, __receiver<_Receiver>>
         friend auto tag_invoke(connect_t, _Self&& __self, _Receiver&& __rcvr)
-          noexcept(__has_nothrow_connect<__member_t<_Self, _Sender>, __receiver<_Receiver>>)
-          -> connect_result_t<__member_t<_Self, _Sender>, __receiver<_Receiver>> {
+          noexcept(__has_nothrow_connect<__member_t<_Self, _SequenceSender>, __receiver<_Receiver>>)
+          -> connect_result_t<__member_t<_Self, _SequenceSender>, __receiver<_Receiver>> {
           return execution::connect(
-              ((_Self&&) __self).__sndr_,
+              ((_Self&&) __self).__seq_sndr_,
               __receiver<_Receiver>{(_Receiver&&) __rcvr, ((_Self&&) __self).__fun_});
         }
 
-        template <__decays_to<__sender> _Self, class _Env>
+        template <__decays_to<__sequence_sender> _Self, class _Env>
         friend auto tag_invoke(get_completion_signatures_t, _Self&&, _Env) ->
           __completion_signatures<_Self, _Env>;
 
         // forward sender queries:
         template <__sender_queries::__sender_query _Tag, class... _As>
-          requires __callable<_Tag, const _Sender&, _As...>
-        friend auto tag_invoke(_Tag __tag, const __sender& __self, _As&&... __as)
-          noexcept(__nothrow_callable<_Tag, const _Sender&, _As...>)
-          -> __call_result_if_t<__sender_queries::__sender_query<_Tag>, _Tag, const _Sender&, _As...> {
-          return ((_Tag&&) __tag)(__self.__sndr_, (_As&&) __as...);
+          requires __callable<_Tag, const _SequenceSender&, _As...>
+        friend auto tag_invoke(_Tag __tag, const __sequence_sender& __self, _As&&... __as)
+          noexcept(__nothrow_callable<_Tag, const _SequenceSender&, _As...>)
+          -> __call_result_if_t<__sender_queries::__sender_query<_Tag>, _Tag, const _SequenceSender&, _As...> {
+          return ((_Tag&&) __tag)(__self.__seq_sndr_, (_As&&) __as...);
         }
       };
 
-    struct ignore_all_t {
-      template <class _Sender, class _Fun>
-        using __sender = __sender<__x<remove_cvref_t<_Sender>>, __x<remove_cvref_t<_Fun>>>;
+    struct then_each_t {
+      template <class _SequenceSender, class _Fun>
+        using __sequence_sender = __sequence_sender<__x<remove_cvref_t<_SequenceSender>>, __x<remove_cvref_t<_Fun>>>;
 
-      template <sender _Sender, __movable_value _Fun>
-        requires __tag_invocable_with_completion_scheduler<ignore_all_t, set_value_t, _Sender, _Fun>
-      sender auto operator()(_Sender&& __sndr, _Fun __fun) const
-        noexcept(nothrow_tag_invocable<ignore_all_t, __completion_scheduler_for<_Sender, set_value_t>, _Sender, _Fun>) {
-        auto __sched = get_completion_scheduler<set_value_t>(__sndr);
-        return tag_invoke(ignore_all_t{}, std::move(__sched), (_Sender&&) __sndr, (_Fun&&) __fun);
+      template <sender _SequenceSender, __movable_value _Fun>
+        requires __tag_invocable_with_completion_scheduler<then_each_t, set_value_t, _SequenceSender, _Fun>
+      sender auto operator()(_SequenceSender&& __seq_sndr, _Fun __fun) const
+        noexcept(nothrow_tag_invocable<then_each_t, __completion_scheduler_for<_SequenceSender, set_value_t>, _SequenceSender, _Fun>) {
+        auto __sched = get_completion_scheduler<set_value_t>(__seq_sndr);
+        return tag_invoke(then_each_t{}, std::move(__sched), (_SequenceSender&&) __seq_sndr, (_Fun&&) __fun);
       }
-      template <sender _Sender, __movable_value _Fun>
-        requires (!__tag_invocable_with_completion_scheduler<ignore_all_t, set_value_t, _Sender, _Fun>) &&
-          tag_invocable<ignore_all_t, _Sender, _Fun>
-      sender auto operator()(_Sender&& __sndr, _Fun __fun) const
-        noexcept(nothrow_tag_invocable<ignore_all_t, _Sender, _Fun>) {
-        return tag_invoke(ignore_all_t{}, (_Sender&&) __sndr, (_Fun&&) __fun);
+      template <sender _SequenceSender, __movable_value _Fun>
+        requires (!__tag_invocable_with_completion_scheduler<then_each_t, set_value_t, _SequenceSender, _Fun>) &&
+          tag_invocable<then_each_t, _SequenceSender, _Fun>
+      sender auto operator()(_SequenceSender&& __seq_sndr, _Fun __fun) const
+        noexcept(nothrow_tag_invocable<then_each_t, _SequenceSender, _Fun>) {
+        return tag_invoke(then_each_t{}, (_SequenceSender&&) __seq_sndr, (_Fun&&) __fun);
       }
-      template <sender _Sender, __movable_value _Fun>
+      template <sender _SequenceSender, __movable_value _Fun>
         requires
-          (!__tag_invocable_with_completion_scheduler<ignore_all_t, set_value_t, _Sender, _Fun>) &&
-          (!tag_invocable<ignore_all_t, _Sender, _Fun>) &&
-          sender<__sender<_Sender, _Fun>>
-      __sender<_Sender, _Fun> operator()(_Sender&& __sndr, _Fun __fun) const {
-        return __sender<_Sender, _Fun>{(_Sender&&) __sndr, (_Fun&&) __fun};
+          (!__tag_invocable_with_completion_scheduler<then_each_t, set_value_t, _SequenceSender, _Fun>) &&
+          (!tag_invocable<then_each_t, _SequenceSender, _Fun>) &&
+          sender<__sequence_sender<_SequenceSender, _Fun>>
+      __sequence_sender<_SequenceSender, _Fun> operator()(_SequenceSender&& __seq_sndr, _Fun __fun) const {
+        return __sequence_sender<_SequenceSender, _Fun>{(_SequenceSender&&) __seq_sndr, (_Fun&&) __fun};
       }
       template <class _Fun>
-      __binder_back<ignore_all_t, _Fun> operator()(_Fun __fun) const {
+      __binder_back<then_each_t, _Fun> operator()(_Fun __fun) const {
         return {{}, {}, {(_Fun&&) __fun}};
       }
     };
   }
-  using __ignore_all::ignore_all_t;
-  inline constexpr ignore_all_t ignore_all{};
-
+  using __then_each::then_each_t;
+  inline constexpr then_each_t then_each{};
 
 } // namespace std::execution::P0TBD
