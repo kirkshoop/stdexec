@@ -589,12 +589,15 @@ namespace _P2519::execution {
           __dispatch_result_();
         }
 
-        void __dispatch_result_() {
+        void __dispatch_result_() noexcept {
           auto& __state = *reinterpret_cast<__future_state<_Sender>*>(__op_);
+          auto* __scope = __scope_;
           while(auto* __sub = __state.__pop_front_()) {
             __sub->__complete_();
           }
-          __record_done_(__scope_);
+          __record_done_(__scope);
+          // deletes __state and therefore deletes this
+          __state.__results_dispatched_();
         }
 
         auto get_env() const& {
@@ -630,10 +633,13 @@ namespace _P2519::execution {
         in_place_stop_source __stop_source_;
 
         void __push_back_(__impl::__subscription* __task);
-        __impl::__subscription* __pop_front_();
+        __impl::__subscription* __pop_front_() noexcept;
+        void __has_no_future_(unique_ptr<__future_state<_Sender>>) noexcept;
+        void __results_dispatched_() noexcept;
 
         std::mutex __mutex_;
         std::condition_variable __cv_;
+        std::unique_ptr<__future_state<_Sender>> __no_future_;
         __impl::__subscription* __head_ = nullptr;
         __impl::__subscription* __tail_ = nullptr;
       };
@@ -669,7 +675,7 @@ namespace _P2519::execution {
       }
 
     template <sender _Sender>
-      inline __impl::__subscription* __future_state<_Sender>::__pop_front_() {
+      inline __impl::__subscription* __future_state<_Sender>::__pop_front_() noexcept {
         std::unique_lock __lock{__mutex_};
         if (__head_ == nullptr) {
           return nullptr;
@@ -681,12 +687,48 @@ namespace _P2519::execution {
         return __subscription;
       }
 
+    template <sender _Sender>
+      inline void __future_state<_Sender>::__has_no_future_(unique_ptr<__future_state<_Sender>> __no_future) noexcept {
+        unique_lock __lock{__mutex_};
+        if (__head_ == nullptr && !__op_) {
+          // completion won the race
+          __lock.unlock();
+          // reset __expired without holding the lock
+          __no_future.reset();
+          return;
+        } else {
+          // completion lost the race
+          __no_future_ = std::move(__no_future);
+        }
+      }
+
+    template <sender _Sender>
+      inline void __future_state<_Sender>::__results_dispatched_() noexcept {
+        unique_ptr<__future_state<_Sender>> __expired;
+        __op_.reset();
+        unique_lock __lock{__mutex_};
+        __expired = std::move(__no_future_);
+        __lock.unlock();
+        // reset __expired without holding the lock
+        __expired.reset();
+      }
+
     template <class _SenderId>
       class __future {
         using _Sender = __t<_SenderId>;
         friend struct async_scope;
         template <class _Receiver>
           using __completions = completion_signatures_of_t<_Sender, env_of_t<_Receiver>>;
+
+        public:
+        ~__future() {
+          if (!!__state_) {
+            __state_->__has_no_future_(std::move(__state_));
+          }
+        }
+        __future(__future&& other) =default;
+        __future& operator=(__future&& other) =default;
+        private:
 
         explicit __future(std::unique_ptr<__future_state<_Sender>> __state) noexcept
           : __state_(std::move(__state))
@@ -725,17 +767,13 @@ namespace _P2519::execution {
       std::atomic<std::size_t> __op_state_{1};
       __async_manual_reset_event __evt_;
 
-      struct __load_atomic {
-        const std::atomic<std::size_t>& __op_state_;
-        void operator()() noexcept {
+      [[nodiscard]] auto __await_and_sync_() const noexcept {
+        return then(__evt_.async_wait(),
+        [this]() noexcept {
           // make sure to synchronize with all the fetch_subs being done while
           // operations complete
           (void) __op_state_.load(std::memory_order_acquire);
-        }
-      };
-
-      [[nodiscard]] auto __await_and_sync_() const noexcept {
-        return then(__evt_.async_wait(), __load_atomic{__op_state_});
+        });
       }
 
     public:
