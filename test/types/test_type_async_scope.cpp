@@ -19,6 +19,7 @@
 #include <execution.hpp>
 #include <async_scope.hpp>
 
+#include "../examples/schedulers/single_thread_context.hpp"
 #include "../examples/schedulers/static_thread_pool.hpp"
 
 #include <test_common/schedulers.hpp>
@@ -27,8 +28,7 @@
 
 namespace ex = std::execution;
 
-template<class _Scheduler>
-void expect_empty(_Scheduler&, _P2519::execution::async_scope& scope) {
+void expect_empty(_P2519::execution::async_scope& scope) {
   ex::run_loop loop;
   ex::scheduler auto sch = loop.get_scheduler();
   auto op = ex::connect(
@@ -39,13 +39,14 @@ void expect_empty(_Scheduler&, _P2519::execution::async_scope& scope) {
 }
 
 TEST_CASE("async_scope will complete", "[types][type_async_scope]") {
-  example::static_thread_pool ctx{1};
+  example::single_thread_context ctx{};
+
 
   ex::scheduler auto sch = ctx.get_scheduler();
 
   SECTION("after construction") {
     _P2519::execution::async_scope scope;
-    expect_empty(sch, scope);
+    expect_empty(scope);
   }
 
   SECTION("after spawn") {
@@ -53,14 +54,15 @@ TEST_CASE("async_scope will complete", "[types][type_async_scope]") {
     ex::sender auto begin = ex::schedule(sch);
     scope.spawn(begin);
     _P2300::this_thread::sync_wait(scope.empty());
-    expect_empty(sch, scope);
+    expect_empty(scope);
   }
 
   SECTION("after nest result discarded") {
     _P2519::execution::async_scope scope;
     ex::sender auto begin = ex::schedule(sch);
     {ex::sender auto nst = scope.nest(begin); (void)nst;}
-    expect_empty(sch, scope);
+    std::this_thread::sync_wait(scope.empty());
+    expect_empty(scope);
   }
 
   SECTION("after nest result started") {
@@ -70,7 +72,7 @@ TEST_CASE("async_scope will complete", "[types][type_async_scope]") {
     auto op = ex::connect(std::move(nst), expect_void_receiver{});
     ex::start(op);
     _P2300::this_thread::sync_wait(scope.empty());
-    expect_empty(sch, scope);
+    expect_empty(scope);
   }
 
   SECTION("after spawn_future result discarded") {
@@ -78,17 +80,18 @@ TEST_CASE("async_scope will complete", "[types][type_async_scope]") {
     ex::sender auto begin = ex::schedule(sch);
     {ex::sender auto ftr = scope.spawn_future(begin); (void)ftr;}
     _P2300::this_thread::sync_wait(scope.empty());
-    expect_empty(sch, scope);
+    expect_empty(scope);
   }
-
+  
   SECTION("after spawn_future result started") {
     _P2519::execution::async_scope scope;
     ex::sender auto begin = ex::schedule(sch);
     ex::sender auto ftr = scope.spawn_future(begin);
+    _P2300::this_thread::sync_wait(scope.empty());
     auto op = ex::connect(std::move(ftr), expect_void_receiver{});
     ex::start(op);
     _P2300::this_thread::sync_wait(scope.empty());
-    expect_empty(sch, scope);
+    expect_empty(scope);
   }
 }
 

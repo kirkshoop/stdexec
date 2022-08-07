@@ -3336,6 +3336,7 @@ namespace _P2300::execution {
           __task* __tail_;
         };
 
+        __attribute__((noinline)) 
         void __execute() noexcept { (*__execute_)(this); }
       };
 
@@ -3344,7 +3345,8 @@ namespace _P2300::execution {
           using _Receiver = __t<_ReceiverId>;
           run_loop* __loop_;
           [[no_unique_address]] _Receiver __rcvr_;
-
+          
+          __attribute__((noinline)) 
           static void __execute_impl(__task* __p) noexcept {
             auto& __rcvr = ((__operation*) __p)->__rcvr_;
             try {

@@ -525,8 +525,10 @@ namespace example {
 
   inline void static_thread_pool::join() noexcept {
     for (auto& t : threads_) {
+      assert(t.joinable());
       t.join();
     }
+    // std::this_thread::sleep_for(std::chrono::milliseconds(1));
     threads_.clear();
   }
 

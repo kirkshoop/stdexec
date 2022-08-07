@@ -354,7 +354,7 @@ namespace _P2519::execution {
           }
 
         template <class _Error>
-          [[noreturn]] void set_error(_Error&& __e) noexcept {
+          void set_error(_Error&& __e) noexcept {
             execution::set_error(std::move(get_state().__rcvr_), (_Error &&) __e);
             __record_done_(__scope_);
           }
@@ -505,11 +505,15 @@ namespace _P2519::execution {
 
           void __complete_() noexcept final override try {
             static_assert(sender_to<_Sender, _Receiver>);
+            unique_lock __lock{__state_->__mutex_};
             if (__state_->__data_.index() == 2 || get_stop_token(get_env(__rcvr_)).stop_requested()) {
+              __lock.unlock();
               set_stopped((_Receiver&&) __rcvr_);
             } else if (__state_->__data_.index() == 1) {
               std::apply(
-                [this](auto&&... __as) {
+                [this, &__lock](auto&&... __as) {
+                  // unlock after __data_ has been moved and before the callback 
+                  __lock.unlock();
                   set_value((_Receiver&&) __rcvr_, ((decltype(__as)&&) __as)...);
                 },
                 std::move(std::get<1>(__state_->__data_)));
@@ -573,7 +577,9 @@ namespace _P2519::execution {
             requires constructible_from<__impl::__future_result_t<_Sender2>, _As...>
           void set_value(_As&&... __as) noexcept try {
             auto& state = *reinterpret_cast<__future_state<_Sender>*>(__op_);
+            unique_lock __lock{state.__mutex_};
             state.__data_.template emplace<1>((_As&&) __as...);
+            __lock.unlock();
             __dispatch_result_();
           } catch(...) {
             std::terminate();
@@ -585,7 +591,9 @@ namespace _P2519::execution {
 
         void set_stopped() noexcept {
           auto& __state = *reinterpret_cast<__future_state<_Sender>*>(__op_);
+          unique_lock __lock{__state.__mutex_};
           __state.__data_.template emplace<2>(execution::set_stopped);
+          __lock.unlock();
           __dispatch_result_();
         }
 
@@ -595,9 +603,10 @@ namespace _P2519::execution {
           while(auto* __sub = __state.__pop_front_()) {
             __sub->__complete_();
           }
-          __record_done_(__scope);
           // deletes __state and therefore deletes this
           __state.__results_dispatched_();
+          // removes this operation from the scope.
+          __record_done_(__scope);
         }
 
         auto get_env() const& {
@@ -628,9 +637,8 @@ namespace _P2519::execution {
         using __op_t = __future_operation_t<_Sender>;
 
         std::optional<__op_t> __op_;
-        std::optional<in_place_stop_callback<__forward_stopped>> __forward_scope_;
-        std::variant<std::monostate, __impl::__future_result_t<_Sender>, execution::set_stopped_t> __data_;
         in_place_stop_source __stop_source_;
+        std::optional<in_place_stop_callback<__forward_stopped>> __forward_scope_;
 
         void __push_back_(__impl::__subscription* __task);
         __impl::__subscription* __pop_front_() noexcept;
@@ -640,6 +648,7 @@ namespace _P2519::execution {
         std::mutex __mutex_;
         std::condition_variable __cv_;
         std::unique_ptr<__future_state<_Sender>> __no_future_;
+        std::variant<std::monostate, __impl::__future_result_t<_Sender>, execution::set_stopped_t> __data_;
         __impl::__subscription* __head_ = nullptr;
         __impl::__subscription* __tail_ = nullptr;
       };
@@ -648,7 +657,9 @@ namespace _P2519::execution {
       template <class _SenderId, class _ReceiverId>
         inline void __operation<_SenderId, _ReceiverId>::__start_() noexcept try {
           if (!!__state_) {
+            unique_lock __lock{__state_->__mutex_};
             if (__state_->__data_.index() > 0) {
+              __lock.unlock();
               __complete_();
             } else {
               __state_->__push_back_(this);
@@ -663,7 +674,7 @@ namespace _P2519::execution {
 
     template <sender _Sender>
       inline void __future_state<_Sender>::__push_back_(__impl::__subscription* __subscription) {
-        std::unique_lock __lock{__mutex_};
+        // __mutex_ must be locked by caller.
         if (__head_ == nullptr) {
           __head_ = __subscription;
         } else {
@@ -688,7 +699,7 @@ namespace _P2519::execution {
       }
 
     template <sender _Sender>
-      inline void __future_state<_Sender>::__has_no_future_(unique_ptr<__future_state<_Sender>> __no_future) noexcept {
+       void __future_state<_Sender>::__has_no_future_(unique_ptr<__future_state<_Sender>> __no_future) noexcept {
         unique_lock __lock{__mutex_};
         if (__head_ == nullptr && !__op_) {
           // completion won the race
@@ -705,12 +716,16 @@ namespace _P2519::execution {
     template <sender _Sender>
       inline void __future_state<_Sender>::__results_dispatched_() noexcept {
         unique_ptr<__future_state<_Sender>> __expired;
-        __op_.reset();
         unique_lock __lock{__mutex_};
-        __expired = std::move(__no_future_);
+        __expired.reset(__no_future_.release());
+        assert(!__no_future_);
+        __forward_scope_.reset();
+        assert(!!__op_);
+        __op_.reset();
         __lock.unlock();
-        // reset __expired without holding the lock
+        // delete this
         __expired.reset();
+        assert(!__expired);
       }
 
     template <class _SenderId>
@@ -723,7 +738,9 @@ namespace _P2519::execution {
         public:
         ~__future() {
           if (!!__state_) {
-            __state_->__has_no_future_(std::move(__state_));
+            auto __state = __state_.get();
+            __state->__has_no_future_(std::move(__state_));
+            assert(!__state_);
           }
         }
         __future(__future&& other) =default;
