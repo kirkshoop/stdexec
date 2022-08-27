@@ -22,21 +22,21 @@
 namespace ex = std::execution;
 namespace P0TBD = ex::P0TBD;
 
-TEST_CASE("Simple test for iotas", "[factories][sequence][iotas]") {
-  auto r = make_expect_sequence_receiver([](int v){return v > 0 && v <= 3;});
-  auto s = P0TBD::iotas(1, 3);
+TEST_CASE("Simple test for ignore_all", "[factories][sequence][ignore_all]") {
+  auto r = expect_void_receiver<>{};
+  auto s = P0TBD::ignore_all(P0TBD::iotas(1, 3));
   auto o1 = ex::connect(std::move(s), std::move(r));
   ex::start(o1);
 }
 
-TEST_CASE("Stack overflow test for iotas", "[factories][sequence][iotas]") {
-  auto o1 = ex::connect(P0TBD::iotas(1, 3000000), make_expect_sequence_receiver([](int v){return v > 0 && v <= 3000000;}));
+TEST_CASE("Stack overflow test for ignore_all", "[factories][sequence][ignore_all]") {
+  auto o1 = ex::connect(P0TBD::ignore_all(P0TBD::iotas(1, 3000000)), expect_void_receiver<>{});
   ex::start(o1);
 }
 
-TEST_CASE("iotas returns a sequence_sender", "[factories][sequence][iotas]") {
-  using r = decltype(make_expect_sequence_receiver([](int v){return v > 0 && v <= 3;}));
-  using s = decltype(P0TBD::iotas(1, 3));
-  static_assert(ex::sender_to<s, r>, "P0TBD::iotas must return a sender");
+TEST_CASE("ignore_all returns a sequence_sender", "[factories][sequence][ignore_all]") {
+  using r = expect_void_receiver<>;
+  using s = decltype(P0TBD::ignore_all(P0TBD::iotas(1, 3)));
+  static_assert(ex::sender_to<s, r>, "P0TBD::ignore_all must return a sender");
   REQUIRE(ex::sender_to<s, r>);
 }

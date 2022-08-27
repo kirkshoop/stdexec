@@ -107,6 +107,7 @@ set(test_sourceFiles
     test/algos/factories/test_just_error.cpp
     test/algos/factories/test_just_stopped.cpp
     test/algos/factories/test_iotas.cpp
+    test/algos/adaptors/test_ignore_all.cpp
     test/algos/adaptors/test_on.cpp
     test/algos/adaptors/test_transfer.cpp
     test/algos/adaptors/test_schedule_from.cpp
