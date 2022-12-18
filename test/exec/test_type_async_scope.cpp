@@ -29,16 +29,16 @@
 namespace ex = stdexec;
 
 namespace {
-  void expect_empty(exec::async_scope& scope) {
-    ex::run_loop loop;
-    ex::scheduler auto sch = loop.get_scheduler();
-    CHECK_FALSE(stdexec::execute_may_block_caller(sch));
-    auto op = ex::connect(
-      ex::then(scope.on_empty(), [&]() { loop.finish(); }),
-      expect_void_receiver{exec::make_env(exec::with(ex::get_scheduler, sch))});
-    ex::start(op);
-    loop.run();
-  }
+void expect_empty(exec::async_scope& context) {
+  ex::run_loop loop;
+  ex::scheduler auto sch = loop.get_scheduler();
+  CHECK_FALSE(stdexec::execute_may_block_caller(sch));
+  auto op = ex::connect(
+    ex::then(context.on_empty(), [&](){ loop.finish(); }),
+    expect_void_receiver{exec::make_env(exec::with(ex::get_scheduler, sch))});
+  ex::start(op);
+  loop.run();
+}
 } // namespace
 
 TEST_CASE("async_scope will complete", "[types][type_async_scope]") {
@@ -47,64 +47,70 @@ TEST_CASE("async_scope will complete", "[types][type_async_scope]") {
   ex::scheduler auto sch = ctx.get_scheduler();
 
   SECTION("after construction") {
-    exec::async_scope scope;
-    expect_empty(scope);
+    exec::async_scope context;
+    expect_empty(context);
   }
 
   SECTION("after spawn") {
-    exec::async_scope scope;
+    exec::async_scope context;
+    auto scope = context.get_nester();
     ex::sender auto begin = ex::schedule(sch);
     scope.spawn(begin);
-    stdexec::sync_wait(scope.on_empty());
-    expect_empty(scope);
+    stdexec::sync_wait(context.on_empty());
+    expect_empty(context);
   }
 
   SECTION("after nest result discarded") {
-    exec::async_scope scope;
+    exec::async_scope context;
+    auto scope = context.get_nester();
     ex::sender auto begin = ex::schedule(sch);
     {
-      ex::sender auto nst = scope.nest(begin);
-      (void) nst;
+      ex::sender auto nst = scope.nest(begin); 
+      (void)nst;
     }
-    stdexec::sync_wait(scope.on_empty());
-    expect_empty(scope);
+    stdexec::sync_wait(context.on_empty());
+    expect_empty(context);
   }
 
   SECTION("after nest result started") {
-    exec::async_scope scope;
+    exec::async_scope context;
+    auto scope = context.get_nester();
     ex::sender auto begin = ex::schedule(sch);
     ex::sender auto nst = scope.nest(begin);
     auto op = ex::connect(std::move(nst), expect_void_receiver{});
     ex::start(op);
-    stdexec::sync_wait(scope.on_empty());
-    expect_empty(scope);
+    stdexec::sync_wait(context.on_empty());
+    expect_empty(context);
   }
 
   SECTION("after spawn_future result discarded") {
     exec::static_thread_pool ctx{1};
-    exec::async_scope scope;
+    exec::async_scope context;
+    auto scope = context.get_nester();
     std::atomic_bool produced{false};
     ex::sender auto begin = ex::schedule(sch);
     {
-      ex::sender auto ftr = scope.spawn_future(begin | stdexec::then([&]() { produced = true; }));
-      (void) ftr;
+      ex::sender auto ftr = scope.spawn_future(
+        begin | stdexec::then([&](){produced = true;})); 
+      (void)ftr;
     }
     stdexec::sync_wait(
-      scope.on_empty() | stdexec::then([&]() { STDEXEC_ASSERT(produced.load()); }));
-    expect_empty(scope);
+      context.on_empty() | stdexec::then([&](){STDEXEC_ASSERT(produced.load());}));
+    expect_empty(context);
   }
 
   SECTION("after spawn_future result started") {
     exec::static_thread_pool ctx{1};
-    exec::async_scope scope;
+    exec::async_scope context;
+    auto scope = context.get_nester();
     std::atomic_bool produced{false};
     ex::sender auto begin = ex::schedule(sch);
-    ex::sender auto ftr = scope.spawn_future(begin | stdexec::then([&]() { produced = true; }));
+    ex::sender auto ftr = scope.spawn_future(begin | stdexec::then([&](){produced = true;}));
     stdexec::sync_wait(
-      scope.on_empty() | stdexec::then([&]() { STDEXEC_ASSERT(produced.load()); }));
+      context.on_empty() | stdexec::then([&](){STDEXEC_ASSERT(produced.load());}));
     auto op = ex::connect(std::move(ftr), expect_void_receiver{});
     ex::start(op);
-    stdexec::sync_wait(scope.on_empty());
-    expect_empty(scope);
+    stdexec::sync_wait(context.on_empty());
+    expect_empty(context);
   }
 }
