@@ -52,13 +52,15 @@ TEST_CASE("spawn_future will execute its work", "[async_scope][spawn_future]") {
   impulse_scheduler sch;
   bool executed{false};
   async_scope context;
-  auto scope = context.get_nester();
+  exec::satisfies<exec::async_nester> auto scope = context.get_nester();
 
   // Non-blocking call
   {
-    ex::sender auto snd = scope.spawn_future(
-      ex::on(sch, ex::just() | ex::then([&] { executed = true; })));
-    (void) snd;
+    ex::sender auto snd =
+      exec::async_nester.spawn_future(scope, 
+        ex::on(sch, ex::just() 
+        | ex::then([&] { executed = true; }))); 
+    (void)snd;
   }
   REQUIRE_FALSE(executed);
   // Run the operation on the scheduler
@@ -73,11 +75,11 @@ TEST_CASE("spawn_future sender will complete", "[async_scope][spawn_future]") {
   bool executed1{false};
   bool executed2{false};
   async_scope context;
-  auto scope = context.get_nester();
+  exec::satisfies<exec::async_nester> auto scope = context.get_nester();
 
   // Non-blocking call
-  ex::sender auto snd = scope.spawn_future(
-    ex::on(sch, ex::just() | ex::then([&] { executed1 = true; })));
+  ex::sender auto snd = exec::async_nester.spawn_future(
+    scope, ex::on(sch, ex::just() | ex::then([&] { executed1 = true; })));
   auto op = ex::connect(std::move(snd), expect_void_receiver_ex{executed2});
   ex::start(op);
   REQUIRE_FALSE(executed1);
@@ -96,11 +98,11 @@ TEST_CASE(
   impulse_scheduler sch;
   bool executed{false};
   async_scope context;
-  auto scope = context.get_nester();
+  exec::satisfies<exec::async_nester> auto scope = context.get_nester();
 
   // Non-blocking call
-  ex::sender auto snd = scope.spawn_future(
-    ex::on(sch, ex::just() | ex::then([&] { executed = true; })));
+  ex::sender auto snd = exec::async_nester.spawn_future(
+    scope, ex::on(sch, ex::just() | ex::then([&] { executed = true; })));
   ex::sender auto snd2 = std::move(snd) | ex::then([&] { REQUIRE(executed); });
   // Execute the given work
   sch.start_next();
@@ -113,10 +115,11 @@ TEST_CASE("spawn_future returned sender can be dropped", "[async_scope][spawn_fu
   impulse_scheduler sch;
   std::atomic_bool executed{false};
   async_scope context;
-  auto scope = context.get_nester();
+  exec::satisfies<exec::async_nester> auto scope = context.get_nester();
 
   // Non-blocking call; simply ignore the returned sender
-  (void) scope.spawn_future(ex::on(sch, ex::just() | ex::then([&] { executed = true; })));
+  (void)exec::async_nester.spawn_future(
+    scope, ex::on(sch, ex::just() | ex::then([&] { executed = true; })));
   REQUIRE_FALSE(executed.load());
   // Execute the given work
   sch.start_next();
@@ -130,13 +133,14 @@ TEST_CASE(
   impulse_scheduler sch;
   bool executed{false};
   async_scope context;
-  auto scope = context.get_nester();
+  exec::satisfies<exec::async_nester> auto scope = context.get_nester();
 
   // Non-blocking call; simply ignore the returned sender
   {
-    ex::sender auto snd = scope.spawn_future(
-      ex::on(sch, ex::just() | ex::then([&] { executed = true; })));
-    (void) snd;
+    ex::sender auto snd = exec::async_nester.spawn_future(
+      scope, ex::on(sch, ex::just() 
+        | ex::then([&] { executed = true; }))); 
+    (void)snd;
   }
   REQUIRE_FALSE(executed);
   // Execute the given work
@@ -152,11 +156,11 @@ TEST_CASE(
   bool executed{false};
   bool executed2{false};
   async_scope context;
-  auto scope = context.get_nester();
+  exec::satisfies<exec::async_nester> auto scope = context.get_nester();
 
   // Non-blocking call; simply ignore the returned sender
-  ex::sender auto snd = scope.spawn_future(
-    ex::on(sch, ex::just() | ex::then([&] { executed = true; })));
+  ex::sender auto snd = exec::async_nester.spawn_future(
+    scope, ex::on(sch, ex::just() | ex::then([&] { executed = true; })));
   auto op = ex::connect(std::move(snd), expect_void_receiver_ex{executed2});
   REQUIRE_FALSE(executed);
   REQUIRE_FALSE(executed2);
@@ -171,12 +175,13 @@ TEST_CASE(
 TEST_CASE("spawn_future will start sender before returning", "[async_scope][spawn_future]") {
   bool executed{false};
   async_scope context;
-  auto scope = context.get_nester();
+  exec::satisfies<exec::async_nester> auto scope = context.get_nester();
 
   // This will be a blocking call
   {
-    ex::sender auto snd = scope.spawn_future(ex::just() | ex::then([&] { executed = true; }));
-    (void) snd;
+    ex::sender auto snd = exec::async_nester.spawn_future(
+      scope, ex::just() | ex::then([&] { executed = true; })); 
+    (void)snd;
   }
   REQUIRE(executed);
   expect_empty(context);
@@ -189,10 +194,10 @@ TEST_CASE(
   bool executed{false};
   bool executed2{false};
   async_scope context;
-  auto scope = context.get_nester();
+  exec::satisfies<exec::async_nester> auto scope = context.get_nester();
 
-  ex::sender auto snd = scope.spawn_future(
-    ex::on(sch, ex::just() | ex::then([&] { executed = true; })));
+  ex::sender auto snd = exec::async_nester.spawn_future(
+    scope, ex::on(sch, ex::just() | ex::then([&] { executed = true; })));
   REQUIRE_FALSE(executed);
   // Execute the work given to spawn_future
   sch.start_next();
@@ -209,11 +214,11 @@ TEST_CASE(
   "spawn_future will propagate exceptions encountered during op creation",
   "[async_scope][spawn_future]") {
   async_scope context;
-  auto scope = context.get_nester();
+  exec::satisfies<exec::async_nester> auto scope = context.get_nester();
   try {
-    ex::sender auto snd = scope.spawn_future(
-      throwing_sender{} | ex::then([&] { FAIL("work should not be executed"); }));
-    (void) snd;
+    ex::sender auto snd = exec::async_nester.spawn_future(
+      scope, throwing_sender{} | ex::then([&] { FAIL("work should not be executed"); }));
+    (void)snd;
     FAIL("Exceptions should have been thrown");
   } catch (const std::logic_error& e) {
     SUCCEED("correct exception caught");
@@ -230,7 +235,7 @@ TEST_CASE(
   impulse_scheduler sch;
   bool executed{false};
   async_scope context;
-  auto scope = context.get_nester();
+  exec::satisfies<exec::async_nester> auto scope = context.get_nester();
 
   // Before adding any operations, the scope is empty
   // TODO: reenable this
@@ -238,9 +243,9 @@ TEST_CASE(
 
   // Non-blocking call
   {
-    ex::sender auto snd = scope.spawn_future(
-      ex::on(sch, ex::just() | ex::then([&] { executed = true; })));
-    (void) snd;
+    ex::sender auto snd = exec::async_nester.spawn_future(
+      scope, ex::on(sch, ex::just() | ex::then([&] { executed = true; }))); 
+    (void)snd;
   }
   REQUIRE_FALSE(executed);
 
@@ -274,7 +279,7 @@ TEST_CASE(
   // constexpr std::size_t num_oper = 10;
   // for (std::size_t i = 0; i < num_oper; i++) {
   //     ex::sender auto snd =
-  //             scope.spawn_future(ex::on(sch, ex::just() | ex::then([&] { num_executed++; })));
+  //             exec::async_nester.spawn_future(scope, ex::on(sch, ex::just() | ex::then([&] { num_executed++; })));
   //     (void)snd;
   //     size_t num_expected_ops = i + 1;
   //     REQUIRE(P2519::__scope::op_count(scope) == num_expected_ops);
@@ -299,28 +304,33 @@ TEST_CASE(
   "[async_scope][spawn_future]") {
   impulse_scheduler sch;
   async_scope context;
-  auto scope = context.get_nester();
+  exec::satisfies<exec::async_nester> auto scope = context.get_nester();
 
   bool cancelled1{false};
   bool cancelled2{false};
 
   {
-    ex::sender auto snd1 = scope.spawn_future(ex::on(
-      sch,
-      ex::just() //
+    ex::sender auto snd1 = exec::async_nester.spawn_future(
+      scope, 
+      ex::on(
+        sch, 
+        ex::just() //
         | ex::let_stopped([&] {
             cancelled1 = true;
             return ex::just();
           })));
-    ex::sender auto snd2 = scope.spawn_future(ex::on(
-      sch,
-      ex::just() //
+
+    ex::sender auto snd2 = exec::async_nester.spawn_future(
+      scope, 
+      ex::on(
+        sch, 
+        ex::just() //
         | ex::let_stopped([&] {
             cancelled2 = true;
             return ex::just();
           })));
-    (void) snd1;
-    (void) snd2;
+    (void)snd1;
+    (void)snd2;
   }
 
   // TODO: reenable this
@@ -350,9 +360,12 @@ TEST_CASE(
 
 template <typename S>
 concept is_spawn_future_worthy =
-    requires(async_scope& context, S&& snd) { 
-      context.get_nester().spawn_future(std::move(snd)); 
-    };
+    requires(
+      S&& snd, 
+      async_scope& context, 
+      decltype(context.get_nester()) scope) { 
+        exec::async_nester.spawn_future(scope, std::move(snd)); 
+      };
 
 TEST_CASE("spawn_future accepts void senders", "[async_scope][spawn_future]") {
   static_assert(is_spawn_future_worthy<decltype(ex::just())>);
@@ -386,7 +399,7 @@ TEST_CASE(
   // REQUIRE(P2519::__scope::empty(scope));
 
   // TODO: make this work
-  // ex::sender auto snd = scope.spawn_future(ex::on(sch, ex::just_stopped()));
+  // ex::sender auto snd = exec::async_nester.spawn_future(scope, ex::on(sch, ex::just_stopped()));
   // (void)snd;
   //
   // // The scope is now non-empty
@@ -405,12 +418,12 @@ TEST_CASE(
 TEST_CASE("spawn_future forwards value to returned sender", "[async_scope][spawn_future]") {
   impulse_scheduler sch;
   async_scope context;
-  auto scope = context.get_nester();
+  exec::satisfies<exec::async_nester> auto scope = context.get_nester();
 
   // TODO: reenable this
   // REQUIRE(P2519::__scope::empty(scope));
 
-  ex::sender auto snd = scope.spawn_future(ex::on(sch, ex::just(13)));
+  ex::sender auto snd = exec::async_nester.spawn_future(scope, ex::on(sch, ex::just(13)));
   sch.start_next();
   wait_for_value(std::move(snd), 13);
   expect_empty(context);
@@ -424,7 +437,7 @@ TEST_CASE("TODO: spawn_future forwards error to returned sender", "[async_scope]
   // REQUIRE(P2519::__scope::empty(scope));
 
   // TODO: fix this
-  // ex::sender auto snd = scope.spawn_future(ex::on(sch, ex::just_error(-1)));
+  // ex::sender auto snd = exec::async_nester.spawn_future(scope, ex::on(sch, ex::just_error(-1)));
   // sch.start_next();
   // try
   // {
@@ -448,7 +461,7 @@ TEST_CASE(
   // REQUIRE(P2519::__scope::empty(scope));
 
   // TODO: fix this
-  // ex::sender auto snd = scope.spawn_future(ex::on(sch, ex::just_stopped()));
+  // ex::sender auto snd = exec::async_nester.spawn_future(scope, ex::on(sch, ex::just_stopped()));
   // sch.start_next();
   // auto op = ex::connect(std::move(snd), expect_stopped_receiver{});
   // ex::start(op);

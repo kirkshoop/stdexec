@@ -38,10 +38,10 @@ TEST_CASE("spawn will execute its work", "[async_scope][spawn]") {
   impulse_scheduler sch;
   bool executed{false};
   async_scope context;
-  auto scope = context.get_nester();
+  exec::satisfies<exec::async_nester> auto scope = context.get_nester();
 
   // Non-blocking call
-  scope.spawn(ex::on(sch, ex::just() | ex::then([&] { executed = true; })));
+  exec::async_nester.spawn(scope, ex::on(sch, ex::just() | ex::then([&] { executed = true; })));
   REQUIRE_FALSE(executed);
   // Run the operation on the scheduler
   sch.start_next();
@@ -52,10 +52,10 @@ TEST_CASE("spawn will execute its work", "[async_scope][spawn]") {
 TEST_CASE("spawn will start sender before returning", "[async_scope][spawn]") {
   bool executed{false};
   async_scope context;
-  auto scope = context.get_nester();
+  exec::satisfies<exec::async_nester> auto scope = context.get_nester();
 
   // This will be a blocking call
-  scope.spawn(ex::just() | ex::then([&] { executed = true; }));
+  exec::async_nester.spawn(scope, ex::just() | ex::then([&] { executed = true; }));
   REQUIRE(executed);
 }
 
@@ -64,9 +64,9 @@ TEST_CASE(
   "spawn will propagate exceptions encountered during op creation", 
   "[async_scope][spawn]") {
   async_scope context;
-  auto scope = context.get_nester();
+  exec::satisfies<exec::async_nester> auto scope = context.get_nester();
   try {
-    scope.spawn(throwing_sender{} | ex::then([&] { FAIL("work should not be executed"); }));
+    exec::async_nester.spawn(scope, throwing_sender{} | ex::then([&] { FAIL("work should not be executed"); }));
     FAIL("Exceptions should have been thrown");
   } catch (const std::logic_error& e) {
     SUCCEED("correct exception caught");
@@ -82,14 +82,14 @@ TEST_CASE(
   impulse_scheduler sch;
   bool executed{false};
   async_scope context;
-  auto scope = context.get_nester();
+  exec::satisfies<exec::async_nester> auto scope = context.get_nester();
 
   // Before adding any operations, the scope is empty
   // TODO: reenable this
   // REQUIRE(P2519::__scope::empty(scope));
 
   // Non-blocking call
-  scope.spawn(ex::on(sch, ex::just() | ex::then([&] { executed = true; })));
+  exec::async_nester.spawn(scope, ex::on(sch, ex::just() | ex::then([&] { executed = true; })));
   REQUIRE_FALSE(executed);
 
   // The scope is now non-empty
@@ -112,7 +112,7 @@ TEST_CASE(
   impulse_scheduler sch;
   std::size_t num_executed{0};
   async_scope context;
-  auto scope = context.get_nester();
+  exec::satisfies<exec::async_nester> auto scope = context.get_nester();
 
   // Before adding any operations, the scope is empty
   // TODO: reenable this
@@ -121,7 +121,7 @@ TEST_CASE(
 
   constexpr std::size_t num_oper = 10;
   for (std::size_t i = 0; i < num_oper; i++) {
-    scope.spawn(ex::on(sch, ex::just() | ex::then([&] { num_executed++; })));
+    exec::async_nester.spawn(scope, ex::on(sch, ex::just() | ex::then([&] { num_executed++; })));
     size_t num_expected_ops = i + 1;
     // TODO: reenable this
     // REQUIRE(P2519::__scope::op_count(scope) == num_expected_ops);
@@ -146,25 +146,26 @@ TEST_CASE(
 TEST_CASE("TODO: spawn work can be cancelled by cancelling the scope", "[async_scope][spawn]") {
   impulse_scheduler sch;
   async_scope context;
-  auto scope = context.get_nester();
+  exec::satisfies<exec::async_nester> auto scope = context.get_nester();
 
   bool cancelled1{false};
   bool cancelled2{false};
 
-  scope.spawn(ex::on(
-    sch,
-    ex::just() //
-      | ex::let_stopped([&] {
-          cancelled1 = true;
-          return ex::just();
-        })));
-  scope.spawn(ex::on(
-    sch,
-    ex::just() //
-      | ex::let_stopped([&] {
-          cancelled2 = true;
-          return ex::just();
-        })));
+  exec::async_nester.spawn(
+    scope, 
+    ex::on(sch, ex::just() 
+    | ex::let_stopped([&] {
+        cancelled1 = true;
+        return ex::just();
+      })));
+
+  exec::async_nester.spawn(
+    scope, 
+    ex::on(sch, ex::just() 
+    | ex::let_stopped([&] {
+        cancelled2 = true;
+        return ex::just();
+      })));
 
   // TODO: reenable this
   // REQUIRE(P2519::__scope::op_count(scope) == 2);
@@ -191,7 +192,9 @@ TEST_CASE("TODO: spawn work can be cancelled by cancelling the scope", "[async_s
 }
 
 template <typename S>
-concept is_spawn_worthy = requires(async_scope& context, S&& snd) { context.get_nester().spawn(std::move(snd)); };
+concept is_spawn_worthy = requires(S&& snd, exec::__scope::__nester& scope) { 
+  exec::async_nester.spawn(scope, std::move(snd), ex::empty_env{}); 
+};
 
 TEST_CASE("spawn accepts void senders", "[async_scope][spawn]") {
   static_assert(is_spawn_worthy<decltype(ex::just())>);
@@ -219,12 +222,12 @@ TEST_CASE(
   "[async_scope][spawn]") {
   impulse_scheduler sch;
   async_scope context;
-  auto scope = context.get_nester();
+  exec::satisfies<exec::async_nester> auto scope = context.get_nester();
 
   // TODO: reenable this
   // REQUIRE(P2519::__scope::empty(scope));
 
-  scope.spawn(ex::on(sch, ex::just_stopped()));
+  exec::async_nester.spawn(scope, ex::on(sch, ex::just_stopped()));
 
   // The scope is now non-empty
   // TODO: reenable this

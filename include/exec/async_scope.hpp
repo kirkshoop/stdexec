@@ -20,6 +20,86 @@
 #include "env.hpp"
 
 namespace exec {
+
+  // utility that enables objects to provide concepts
+  template<class _T0, auto _Satisfier, class... _Tn>
+  concept satisfies = _Satisfier.template satisfies<_T0, _Tn...>();
+
+  /////////////////////////////////////////////////////////////////////////////
+  // async_resource
+  namespace __resource {
+    using namespace stdexec;
+
+    struct open_t {
+      template <class _Fn>
+        using __f = __minvoke<_Fn>;
+
+      template <class _AsyncResource>
+        requires tag_invocable<open_t, _AsyncResource>
+      auto operator()(_AsyncResource&& __rsrc) const {
+        return tag_invoke(open_t{}, (_AsyncResource&&) __rsrc);
+      }
+    };
+
+    struct run_t {
+      template <class _Fn>
+        using __f = __minvoke<_Fn>;
+
+      template <class _AsyncResource>
+        requires tag_invocable<run_t, _AsyncResource>
+      auto operator()(_AsyncResource&& __rsrc) const {
+        return tag_invoke(run_t{}, (_AsyncResource&&) __rsrc);
+      }
+    };
+
+    struct close_t {
+      template <class _Fn>
+        using __f = __minvoke<_Fn>;
+
+      template <class _AsyncResource>
+        requires tag_invocable<close_t, _AsyncResource>
+      auto operator()(_AsyncResource&& __rsrc) const {
+        return tag_invoke(close_t{}, (_AsyncResource&&) __rsrc);
+      }
+    };
+
+    struct get_resource_token_t {
+      template <class _Fn>
+        using __f = __minvoke<_Fn>;
+
+      template <class _AsyncResource>
+        requires tag_invocable<get_resource_token_t, _AsyncResource>
+      auto operator()(const _AsyncResource& __rsrc) const {
+        return tag_invoke(get_resource_token_t{}, __rsrc);
+      }
+    };
+
+    struct async_resource_t {
+      template<class _T>
+        requires 
+          requires (_T& __t){
+            open_t{}(__t);
+            run_t{}(__t);
+            close_t{}(__t);
+          } &&
+          requires (const _T& __t){
+            get_resource_token_t{}(__t);
+          }
+        inline constexpr bool satisfies() const {return true;}
+      using open_t = __resource::open_t;
+      inline static constexpr open_t open{};
+      using run_t = __resource::run_t;
+      inline static constexpr run_t run{};
+      using close_t = __resource::close_t;
+      inline static constexpr close_t close{};
+      using get_resource_token_t = __resource::get_resource_token_t;
+      inline static constexpr get_resource_token_t get_resource_token{};
+    };
+  } // namespace __resource
+
+  using __resource::async_resource_t;
+  inline constexpr async_resource_t async_resource{};
+
   /////////////////////////////////////////////////////////////////////////////
   // async_scope
   namespace __scope {
@@ -47,7 +127,7 @@ namespace exec {
         using __f = __minvoke<_Fn, _Env, _NestedSender>;
 
       template <class _AsyncScopeToken, __movable_value _Env = empty_env, sender<__env_t<_Env>> _NestedSender>
-        requires tag_invocable<nest_t, _AsyncScopeToken, _NestedSender>
+        requires tag_invocable<spawn_t, _AsyncScopeToken, _NestedSender, _Env>
       void operator()(_AsyncScopeToken&& __tkn, _NestedSender&& __ns, _Env __env = {}) const {
         (void) tag_invoke(spawn_t{}, (_AsyncScopeToken&&) __tkn, (_NestedSender&&) __ns, (_Env&&) __env);
       }
@@ -58,10 +138,27 @@ namespace exec {
         using __f = __minvoke<_Fn, _Env, _NestedSender>;
 
       template <class _AsyncScopeToken, __movable_value _Env = empty_env, sender<__env_t<_Env>> _NestedSender>
-        requires tag_invocable<nest_t, _AsyncScopeToken, _NestedSender>
+        requires tag_invocable<spawn_future_t, _AsyncScopeToken, _NestedSender, _Env>
       auto operator()(_AsyncScopeToken&& __tkn, _NestedSender&& __ns, _Env __env = {}) const {
         return tag_invoke(spawn_future_t{}, (_AsyncScopeToken&&) __tkn, (_NestedSender&&) __ns, (_Env&&) __env);
       }
+    };
+
+    struct async_nester_t {
+      template<class _T>
+        requires 
+          requires (_T __t){
+            nest_t{}(__t, just());
+            spawn_t{}(__t, just());
+            spawn_future_t{}(__t, just());
+          }
+        inline constexpr bool satisfies() const {return true;}
+      using nest_t = __scope::nest_t;
+      inline static constexpr nest_t nest{};
+      using spawn_t = __scope::spawn_t;
+      inline static constexpr spawn_t spawn{};
+      using spawn_future_t = __scope::spawn_future_t;
+      inline static constexpr spawn_future_t spawn_future{};
     };
 
     struct __impl;
@@ -698,31 +795,6 @@ namespace exec {
       template <sender _Constrained>
       using nest_result_t = __nest_sender_t<_Constrained>;
 
-      template <sender _Constrained>
-      [[nodiscard]] nest_result_t<_Constrained>
-      nest(_Constrained&& __c) {
-        return nest_result_t<_Constrained>{__impl_, (_Constrained&&) __c};
-      }
-
-      template <__movable_value _Env = empty_env, sender_in<__env_t<_Env>> _Sender>
-        requires sender_to<nest_result_t<_Sender>, __spawn_receiver_t<_Env>>
-      void spawn(_Sender&& __sndr, _Env __env = {}) {
-        using __op_t = __spawn_operation_t<nest_result_t<_Sender>, _Env>;
-        // start is noexcept so we can assume that the operation will complete
-        // after this, which means we can rely on its self-ownership to ensure
-        // that it is eventually deleted
-        stdexec::start(*new __op_t{nest((_Sender&&) __sndr), (_Env&&) __env, __impl_});
-      }
-
-      template <__movable_value _Env = empty_env, sender_in<__env_t<_Env>> _Sender>
-      __future_t<_Sender, _Env> spawn_future(_Sender&& __sndr, _Env __env = {}) {
-        using __state_t = __future_state<nest_result_t<_Sender>, _Env>;
-        auto __state =
-          std::make_unique<__state_t>(nest((_Sender&&) __sndr), (_Env&&) __env, __impl_);
-        stdexec::start(__state->__op_);
-        return __future_t<_Sender, _Env>{std::move(__state)};
-      }
-
       in_place_stop_token get_stop_token() const noexcept {
         return __impl_->__stop_source_.get_token();
       }
@@ -774,7 +846,7 @@ namespace exec {
       }
 
       __nester get_nester() const noexcept {
-        return {const_cast<__impl*>(&__impl_)};
+        return {&__impl_};
       }
 
       in_place_stop_source& get_stop_source() noexcept {
@@ -789,8 +861,28 @@ namespace exec {
         return __impl_.__stop_source_.request_stop();
       }
 
-  private:
-      __impl __impl_;
+    private:
+      // friend __open_sender
+      // tag_invoke(async_resource_t::open_t, async_scope& __self) {
+      //   return __open_sender{&__self.__impl_};
+      // }
+
+      // friend __run_sender
+      // tag_invoke(async_resource_t::run_t, async_scope& __self) {
+      //   return __run_sender{&__self.__impl_};
+      // }
+
+      // friend __close_sender
+      // tag_invoke(async_resource_t::close_t, async_scope& __self) {
+      //   return __close_sender{&__self.__impl_};
+      // }
+
+      friend __nester
+      tag_invoke(async_resource_t::get_resource_token_t, const async_scope& __self) {
+        return {&__self.__impl_};
+      }
+    private:
+      mutable __impl __impl_;
     };
 
     ////////////////////////////////////////////////////////////////////////////
@@ -988,12 +1080,8 @@ namespace exec {
 
   } // namespace __scope
 
-  using __scope::nest_t;
-  inline constexpr nest_t nest{};
-  using __scope::spawn_t;
-  inline constexpr spawn_t spawn{};
-  using __scope::spawn_future_t;
-  inline constexpr spawn_future_t spawn_future{};
+  using __scope::async_nester_t;
+  inline constexpr async_nester_t async_nester{};
 
   using __scope::async_scope;
   using __scope::enter_scopes_t;

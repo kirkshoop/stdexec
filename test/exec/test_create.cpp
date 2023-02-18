@@ -42,7 +42,9 @@ namespace {
     void anIntAPI(int a, int b, void* context, void (*completed)(void* context, int result)) {
       // Execute some work asynchronously on some other thread. When its
       // work is finished, pass the result to the callback.
-      context_.get_nester().spawn(
+      exec::satisfies<exec::async_nester> auto scope = context_.get_nester();
+      exec::async_nester.spawn(
+        scope,
         ex::on(
           pool_.get_scheduler(),
           ex::then(ex::just(), [=]() noexcept {
@@ -56,7 +58,9 @@ namespace {
     void aVoidAPI(void* context, void (*completed)(void* context)) {
       // Execute some work asynchronously on some other thread. When its
       // work is finished, pass the result to the callback.
-      context_.get_nester().spawn(
+      exec::satisfies<exec::async_nester> auto scope = context_.get_nester();
+      exec::async_nester.spawn(
+        scope,
         ex::on(
           pool_.get_scheduler(),
           ex::then(ex::just(), [=]() noexcept {

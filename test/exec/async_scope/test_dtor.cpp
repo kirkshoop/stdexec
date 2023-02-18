@@ -21,7 +21,7 @@ TEST_CASE("async_scope destruction after spawning work into it", "[async_scope][
 
     // Add some work into the scope
     for (int i = 0; i < 10; i++)
-      scope.spawn(ex::on(sch, ex::just() | ex::then([&] { counter++; })));
+      exec::async_nester.spawn(scope, ex::on(sch, ex::just() | ex::then([&] { counter++; })));
 
     // Wait on the work, before calling destructor
     sync_wait(context.on_empty());

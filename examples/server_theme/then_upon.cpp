@@ -172,7 +172,7 @@ ex::sender auto handle_classify_request(const http_request& req) {
 int main() {
   // Create a thread pool and get a scheduler from it
   exec::async_scope context;
-  auto scope = context.get_nester();
+  exec::satisfies<exec::async_nester> auto scope = context.get_nester();
   exec::static_thread_pool pool{8};
   ex::scheduler auto sched = pool.get_scheduler();
 
@@ -194,14 +194,14 @@ int main() {
     ex::sender auto snd = handle_classify_request(req);
 
     // Pack this into a simplified flow and execute it asynchronously
-    ex::sender auto action =
-      std::move(snd) //
+    ex::sender auto action = 
+      std::move(snd) 
       | ex::then([](http_response resp) {
           std::ostringstream oss;
           oss << "Sending response: " << resp.status_code_ << " / " << resp.body_ << "\n";
           std::cout << oss.str();
         });
-    scope.spawn(ex::on(sched, std::move(action)));
+    exec::async_nester.spawn(scope, ex::on(sched, std::move(action)));
   }
 
   stdexec::sync_wait(context.on_empty());

@@ -30,11 +30,12 @@ TEST_CASE(
   {
     impulse_scheduler sch;
     async_scope context;
-    auto scope = context.get_nester();
+    exec::satisfies<exec::async_nester> auto scope = context.get_nester();
     bool called = false;
 
     // put work in the scope
-    scope.spawn(ex::on(sch, ex::just()) | ex::upon_stopped([&] { called = true; }));
+    exec::async_nester.spawn(
+      scope, ex::on(sch, ex::just()) | ex::upon_stopped([&]{ called = true; }));
     REQUIRE_FALSE(called);
 
     // start a thread waiting on when the scope is empty:

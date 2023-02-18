@@ -51,9 +51,9 @@ int main() {
   exec::async_scope context;
   auto scope = context.get_nester();
 
-  scheduler auto sch = ctx.get_scheduler();                                 // 1
+  scheduler auto sch = ctx.get_scheduler(); // 1
 
-  sender auto begin = schedule(sch);                                        // 2
+  sender auto begin = schedule(sch); // 2
 
   sender auto printVoid = then(begin, []() noexcept { printf("void\n"); }); // 3
 
@@ -66,7 +66,7 @@ int main() {
     "spawn void\n"
     "==========\n");
 
-  scope.spawn(printVoid); // 5
+  exec::async_nester.spawn(scope, printVoid); // 5
 
   sync_wait(printEmpty);
 
@@ -77,9 +77,9 @@ int main() {
 
   sender auto fortyTwo = then(begin, []() noexcept { return 42; }); // 6
 
-  scope.spawn(printVoid);                                           // 7
+  exec::async_nester.spawn(scope, printVoid); // 7
 
-  sender auto fortyTwoFuture = scope.spawn_future(fortyTwo);        // 8
+  sender auto fortyTwoFuture = exec::async_nester.spawn_future(scope, fortyTwo); // 8
 
   sender auto printFortyTwo = then(std::move(fortyTwoFuture), [](int fortyTwo) noexcept {
     printf("%d\n", fortyTwo);
@@ -92,20 +92,20 @@ int main() {
   sync_wait(std::move(allDone));
 
   {
-    sender auto nest = scope.nest(begin);
-    (void) nest;
+    sender auto nest = exec::async_nester.nest(scope, begin);
+    (void)nest;
   }
   sync_wait(context.on_empty());
 
   {
-    sender auto nest = scope.nest(begin);
+    sender auto nest = exec::async_nester.nest(scope, begin);
     auto op = connect(std::move(nest), noop_receiver{});
     (void) op;
   }
   sync_wait(context.on_empty());
 
   {
-    sender auto nest = scope.nest(begin);
+    sender auto nest = exec::async_nester.nest(scope, begin);
     sync_wait(std::move(nest));
   }
   sync_wait(context.on_empty());

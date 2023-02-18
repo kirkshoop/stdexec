@@ -92,7 +92,7 @@ int main() {
   std::array<std::byte, 16 * 1024> buffer;
 
   exec::async_scope context;
-  auto scope = context.get_nester();
+  exec::satisfies<exec::async_nester> auto scope = context.get_nester();
 
   // Fake a couple of requests
   for (int i = 0; i < 10; i++) {
@@ -113,7 +113,7 @@ int main() {
       ;
 
     // execute the whole flow asynchronously
-    scope.spawn(std::move(snd));
+    exec::async_nester.spawn(scope, std::move(snd));
   }
 
   (void) stdexec::sync_wait(context.on_empty());

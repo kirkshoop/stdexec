@@ -18,10 +18,10 @@ TEST_CASE("empty will complete immediately on an empty async_scope", "[async_sco
 
 TEST_CASE("empty sender can properly connect a void receiver", "[async_scope][empty]") {
   async_scope context;
-  auto scope = context.get_nester();
+  exec::satisfies<exec::async_nester> auto scope = context.get_nester();
   bool is_empty{false};
 
-  scope.spawn(ex::just());
+  exec::async_nester.spawn(scope, ex::just());
 
   ex::sender auto snd = context.on_empty() | ex::then([&] { is_empty = true; });
   auto op = ex::connect(std::move(snd), expect_void_receiver{});
@@ -32,10 +32,10 @@ TEST_CASE("empty sender can properly connect a void receiver", "[async_scope][em
 TEST_CASE("empty will complete after the work is done", "[async_scope][empty]") {
   impulse_scheduler sch;
   async_scope context;
-  auto scope = context.get_nester();
+  exec::satisfies<exec::async_nester> auto scope = context.get_nester();
 
   // Add some work
-  scope.spawn(ex::on(sch, ex::just()));
+  exec::async_nester.spawn(scope, ex::on(sch, ex::just()));
 
   // The on_empty() sender cannot notify now
   bool is_empty{false};
@@ -54,10 +54,10 @@ TEST_CASE("empty will complete after the work is done", "[async_scope][empty]") 
 TEST_CASE("TODO: empty can be used multiple times", "[async_scope][empty]") {
   impulse_scheduler sch;
   async_scope context;
-  auto scope = context.get_nester();
+  exec::satisfies<exec::async_nester> auto scope = context.get_nester();
 
   // Add some work
-  scope.spawn(ex::on(sch, ex::just()));
+  exec::async_nester.spawn(scope, ex::on(sch, ex::just()));
 
   // The on_empty() sender cannot notify now
   bool is_empty{false};
@@ -73,7 +73,7 @@ TEST_CASE("TODO: empty can be used multiple times", "[async_scope][empty]") {
   REQUIRE(is_empty);
 
   // Add some work
-  scope.spawn(ex::on(sch, ex::just()));
+  exec::async_nester.spawn(scope, ex::on(sch, ex::just()));
 
   // The on_empty() sender cannot notify now
   bool is_empty2{false};
@@ -94,7 +94,7 @@ TEST_CASE("TODO: empty can be used multiple times", "[async_scope][empty]") {
 TEST_CASE("waiting on work that spawns more work", "[async_scope][empty]") {
   impulse_scheduler sch;
   async_scope context;
-  auto scope = context.get_nester();
+  exec::satisfies<exec::async_nester> auto scope = context.get_nester();
 
   bool work1_done{false};
   auto work1 = [&] {
@@ -103,14 +103,14 @@ TEST_CASE("waiting on work that spawns more work", "[async_scope][empty]") {
   bool work2_done{false};
   auto work2 = [&] {
     // Spawn work
-    scope.spawn(ex::on(sch, ex::just() | ex::then(work1)));
+    exec::async_nester.spawn(scope, ex::on(sch, ex::just() | ex::then(work1)));
     // We are done
     work2_done = true;
   };
 
   // Spawn work 2
   // No work is executed until the impulse scheduler dictates
-  scope.spawn(ex::on(sch, ex::just() | ex::then(work2)));
+  exec::async_nester.spawn(scope, ex::on(sch, ex::just() | ex::then(work2)));
 
   // start an on_empty() sender
   bool is_empty{false};
@@ -145,7 +145,7 @@ TEST_CASE(
   "[async_scope][empty]") {
   impulse_scheduler sch;
   async_scope context;
-  auto scope = context.get_nester();
+  exec::satisfies<exec::async_nester> auto scope = context.get_nester();
 
   bool is_empty1{false};
   ex::sender auto snd = ex::on(inline_scheduler{}, context.on_empty()) //
@@ -157,12 +157,9 @@ TEST_CASE(
   // cancel & add work
   context.request_stop();
   bool work_executed{false};
-  scope.spawn(
-    ex::on(sch, ex::just()) //
-    | ex::upon_stopped([&] {
-        work_executed = true;
-        printf(".\n");
-      }));
+  exec::async_nester.spawn(scope, 
+    ex::on(sch, ex::just())
+    | ex::upon_stopped([&] { work_executed = true; printf(".\n");}));
   // note that we don't tell impulse sender to start the work
 
   bool is_empty2{false};
