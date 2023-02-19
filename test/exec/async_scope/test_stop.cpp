@@ -30,7 +30,7 @@ TEST_CASE(
   {
     impulse_scheduler sch;
     async_scope context;
-    exec::satisfies<exec::async_nester> auto scope = context.get_nester();
+    exec::satisfies<exec::async_nester> auto scope = exec::async_resource.get_resource_token(context);
     bool called = false;
 
     // put work in the scope

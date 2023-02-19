@@ -49,7 +49,7 @@ class noop_receiver : receiver_adaptor<noop_receiver> {
 int main() {
   exec::static_thread_pool ctx{1};
   exec::async_scope context;
-  auto scope = context.get_nester();
+  auto scope = exec::async_resource.get_resource_token(context);
 
   scheduler auto sch = ctx.get_scheduler(); // 1
 

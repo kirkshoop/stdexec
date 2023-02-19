@@ -17,7 +17,7 @@ TEST_CASE("async_scope destruction after spawning work into it", "[async_scope][
   std::atomic<int> counter{0};
   {
     async_scope context;
-    auto scope = context.get_nester();
+    exec::satisfies<exec::async_nester> auto scope = exec::async_resource.get_resource_token(context);
 
     // Add some work into the scope
     for (int i = 0; i < 10; i++)

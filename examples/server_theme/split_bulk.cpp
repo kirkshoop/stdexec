@@ -169,7 +169,7 @@ int main() {
   // Create a thread pool and get a scheduler from it
   exec::static_thread_pool pool{8};
   exec::async_scope context;
-  exec::satisfies<exec::async_nester> auto scope = context.get_nester();
+  exec::satisfies<exec::async_nester> auto scope = exec::async_resource.get_resource_token(context);
   ex::scheduler auto sched = pool.get_scheduler();
 
   // Fake a couple of edge_detect requests

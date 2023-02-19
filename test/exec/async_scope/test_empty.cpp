@@ -18,7 +18,7 @@ TEST_CASE("empty will complete immediately on an empty async_scope", "[async_sco
 
 TEST_CASE("empty sender can properly connect a void receiver", "[async_scope][empty]") {
   async_scope context;
-  exec::satisfies<exec::async_nester> auto scope = context.get_nester();
+  exec::satisfies<exec::async_nester> auto scope = exec::async_resource.get_resource_token(context);
   bool is_empty{false};
 
   exec::async_nester.spawn(scope, ex::just());
@@ -32,7 +32,7 @@ TEST_CASE("empty sender can properly connect a void receiver", "[async_scope][em
 TEST_CASE("empty will complete after the work is done", "[async_scope][empty]") {
   impulse_scheduler sch;
   async_scope context;
-  exec::satisfies<exec::async_nester> auto scope = context.get_nester();
+  exec::satisfies<exec::async_nester> auto scope = exec::async_resource.get_resource_token(context);
 
   // Add some work
   exec::async_nester.spawn(scope, ex::on(sch, ex::just()));
@@ -54,7 +54,7 @@ TEST_CASE("empty will complete after the work is done", "[async_scope][empty]") 
 TEST_CASE("TODO: empty can be used multiple times", "[async_scope][empty]") {
   impulse_scheduler sch;
   async_scope context;
-  exec::satisfies<exec::async_nester> auto scope = context.get_nester();
+  exec::satisfies<exec::async_nester> auto scope = exec::async_resource.get_resource_token(context);
 
   // Add some work
   exec::async_nester.spawn(scope, ex::on(sch, ex::just()));
@@ -94,7 +94,7 @@ TEST_CASE("TODO: empty can be used multiple times", "[async_scope][empty]") {
 TEST_CASE("waiting on work that spawns more work", "[async_scope][empty]") {
   impulse_scheduler sch;
   async_scope context;
-  exec::satisfies<exec::async_nester> auto scope = context.get_nester();
+  exec::satisfies<exec::async_nester> auto scope = exec::async_resource.get_resource_token(context);
 
   bool work1_done{false};
   auto work1 = [&] {
@@ -145,7 +145,7 @@ TEST_CASE(
   "[async_scope][empty]") {
   impulse_scheduler sch;
   async_scope context;
-  exec::satisfies<exec::async_nester> auto scope = context.get_nester();
+  exec::satisfies<exec::async_nester> auto scope = exec::async_resource.get_resource_token(context);
 
   bool is_empty1{false};
   ex::sender auto snd = ex::on(inline_scheduler{}, context.on_empty()) //

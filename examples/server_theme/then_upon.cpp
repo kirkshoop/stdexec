@@ -172,7 +172,7 @@ ex::sender auto handle_classify_request(const http_request& req) {
 int main() {
   // Create a thread pool and get a scheduler from it
   exec::async_scope context;
-  exec::satisfies<exec::async_nester> auto scope = context.get_nester();
+  exec::satisfies<exec::async_nester> auto scope = exec::async_resource.get_resource_token(context);
   exec::static_thread_pool pool{8};
   ex::scheduler auto sched = pool.get_scheduler();
 

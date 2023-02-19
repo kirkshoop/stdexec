@@ -92,7 +92,7 @@ int main() {
   std::array<std::byte, 16 * 1024> buffer;
 
   exec::async_scope context;
-  exec::satisfies<exec::async_nester> auto scope = context.get_nester();
+  exec::satisfies<exec::async_nester> auto scope = exec::async_resource.get_resource_token(context);
 
   // Fake a couple of requests
   for (int i = 0; i < 10; i++) {

@@ -53,7 +53,7 @@ TEST_CASE("async_scope will complete", "[types][type_async_scope]") {
 
   SECTION("after spawn") {
     exec::async_scope context;
-    exec::satisfies<exec::async_nester> auto scope = context.get_nester();
+    exec::satisfies<exec::async_nester> auto scope = exec::async_resource.get_resource_token(context);
     ex::sender auto begin = ex::schedule(sch);
     exec::async_nester.spawn(scope, begin);
     stdexec::sync_wait(context.on_empty());
@@ -62,7 +62,7 @@ TEST_CASE("async_scope will complete", "[types][type_async_scope]") {
 
   SECTION("after nest result discarded") {
     exec::async_scope context;
-    exec::satisfies<exec::async_nester> auto scope = context.get_nester();
+    exec::satisfies<exec::async_nester> auto scope = exec::async_resource.get_resource_token(context);
     ex::sender auto begin = ex::schedule(sch);
     {
       ex::sender auto nst = exec::async_nester.nest(scope, begin); 
@@ -74,7 +74,7 @@ TEST_CASE("async_scope will complete", "[types][type_async_scope]") {
 
   SECTION("after nest result started") {
     exec::async_scope context;
-    exec::satisfies<exec::async_nester> auto scope = context.get_nester();
+    exec::satisfies<exec::async_nester> auto scope = exec::async_resource.get_resource_token(context);
     ex::sender auto begin = ex::schedule(sch);
     ex::sender auto nst = exec::async_nester.nest(scope, begin);
     auto op = ex::connect(std::move(nst), expect_void_receiver{});
@@ -86,7 +86,7 @@ TEST_CASE("async_scope will complete", "[types][type_async_scope]") {
   SECTION("after spawn_future result discarded") {
     exec::static_thread_pool ctx{1};
     exec::async_scope context;
-    exec::satisfies<exec::async_nester> auto scope = context.get_nester();
+    exec::satisfies<exec::async_nester> auto scope = exec::async_resource.get_resource_token(context);
     std::atomic_bool produced{false};
     ex::sender auto begin = ex::schedule(sch);
     {
@@ -101,7 +101,7 @@ TEST_CASE("async_scope will complete", "[types][type_async_scope]") {
   SECTION("after spawn_future result started") {
     exec::static_thread_pool ctx{1};
     exec::async_scope context;
-    exec::satisfies<exec::async_nester> auto scope = context.get_nester();
+    exec::satisfies<exec::async_nester> auto scope = exec::async_resource.get_resource_token(context);
     std::atomic_bool produced{false};
     ex::sender auto begin = ex::schedule(sch);
     ex::sender auto ftr = exec::async_nester.spawn_future(scope, begin | stdexec::then([&](){produced = true;}));

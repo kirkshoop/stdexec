@@ -52,7 +52,7 @@ TEST_CASE("spawn_future will execute its work", "[async_scope][spawn_future]") {
   impulse_scheduler sch;
   bool executed{false};
   async_scope context;
-  exec::satisfies<exec::async_nester> auto scope = context.get_nester();
+  exec::satisfies<exec::async_nester> auto scope = exec::async_resource.get_resource_token(context);
 
   // Non-blocking call
   {
@@ -75,7 +75,7 @@ TEST_CASE("spawn_future sender will complete", "[async_scope][spawn_future]") {
   bool executed1{false};
   bool executed2{false};
   async_scope context;
-  exec::satisfies<exec::async_nester> auto scope = context.get_nester();
+  exec::satisfies<exec::async_nester> auto scope = exec::async_resource.get_resource_token(context);
 
   // Non-blocking call
   ex::sender auto snd = exec::async_nester.spawn_future(
@@ -98,7 +98,7 @@ TEST_CASE(
   impulse_scheduler sch;
   bool executed{false};
   async_scope context;
-  exec::satisfies<exec::async_nester> auto scope = context.get_nester();
+  exec::satisfies<exec::async_nester> auto scope = exec::async_resource.get_resource_token(context);
 
   // Non-blocking call
   ex::sender auto snd = exec::async_nester.spawn_future(
@@ -115,7 +115,7 @@ TEST_CASE("spawn_future returned sender can be dropped", "[async_scope][spawn_fu
   impulse_scheduler sch;
   std::atomic_bool executed{false};
   async_scope context;
-  exec::satisfies<exec::async_nester> auto scope = context.get_nester();
+  exec::satisfies<exec::async_nester> auto scope = exec::async_resource.get_resource_token(context);
 
   // Non-blocking call; simply ignore the returned sender
   (void)exec::async_nester.spawn_future(
@@ -133,7 +133,7 @@ TEST_CASE(
   impulse_scheduler sch;
   bool executed{false};
   async_scope context;
-  exec::satisfies<exec::async_nester> auto scope = context.get_nester();
+  exec::satisfies<exec::async_nester> auto scope = exec::async_resource.get_resource_token(context);
 
   // Non-blocking call; simply ignore the returned sender
   {
@@ -156,7 +156,7 @@ TEST_CASE(
   bool executed{false};
   bool executed2{false};
   async_scope context;
-  exec::satisfies<exec::async_nester> auto scope = context.get_nester();
+  exec::satisfies<exec::async_nester> auto scope = exec::async_resource.get_resource_token(context);
 
   // Non-blocking call; simply ignore the returned sender
   ex::sender auto snd = exec::async_nester.spawn_future(
@@ -175,7 +175,7 @@ TEST_CASE(
 TEST_CASE("spawn_future will start sender before returning", "[async_scope][spawn_future]") {
   bool executed{false};
   async_scope context;
-  exec::satisfies<exec::async_nester> auto scope = context.get_nester();
+  exec::satisfies<exec::async_nester> auto scope = exec::async_resource.get_resource_token(context);
 
   // This will be a blocking call
   {
@@ -194,7 +194,7 @@ TEST_CASE(
   bool executed{false};
   bool executed2{false};
   async_scope context;
-  exec::satisfies<exec::async_nester> auto scope = context.get_nester();
+  exec::satisfies<exec::async_nester> auto scope = exec::async_resource.get_resource_token(context);
 
   ex::sender auto snd = exec::async_nester.spawn_future(
     scope, ex::on(sch, ex::just() | ex::then([&] { executed = true; })));
@@ -214,7 +214,7 @@ TEST_CASE(
   "spawn_future will propagate exceptions encountered during op creation",
   "[async_scope][spawn_future]") {
   async_scope context;
-  exec::satisfies<exec::async_nester> auto scope = context.get_nester();
+  exec::satisfies<exec::async_nester> auto scope = exec::async_resource.get_resource_token(context);
   try {
     ex::sender auto snd = exec::async_nester.spawn_future(
       scope, throwing_sender{} | ex::then([&] { FAIL("work should not be executed"); }));
@@ -235,7 +235,7 @@ TEST_CASE(
   impulse_scheduler sch;
   bool executed{false};
   async_scope context;
-  exec::satisfies<exec::async_nester> auto scope = context.get_nester();
+  exec::satisfies<exec::async_nester> auto scope = exec::async_resource.get_resource_token(context);
 
   // Before adding any operations, the scope is empty
   // TODO: reenable this
@@ -304,7 +304,7 @@ TEST_CASE(
   "[async_scope][spawn_future]") {
   impulse_scheduler sch;
   async_scope context;
-  exec::satisfies<exec::async_nester> auto scope = context.get_nester();
+  exec::satisfies<exec::async_nester> auto scope = exec::async_resource.get_resource_token(context);
 
   bool cancelled1{false};
   bool cancelled2{false};
@@ -363,7 +363,7 @@ concept is_spawn_future_worthy =
     requires(
       S&& snd, 
       async_scope& context, 
-      decltype(context.get_nester()) scope) { 
+      decltype(exec::async_resource.get_resource_token(context)) scope) { 
         exec::async_nester.spawn_future(scope, std::move(snd)); 
       };
 
@@ -418,7 +418,7 @@ TEST_CASE(
 TEST_CASE("spawn_future forwards value to returned sender", "[async_scope][spawn_future]") {
   impulse_scheduler sch;
   async_scope context;
-  exec::satisfies<exec::async_nester> auto scope = context.get_nester();
+  exec::satisfies<exec::async_nester> auto scope = exec::async_resource.get_resource_token(context);
 
   // TODO: reenable this
   // REQUIRE(P2519::__scope::empty(scope));

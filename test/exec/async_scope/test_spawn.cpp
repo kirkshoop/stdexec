@@ -38,7 +38,7 @@ TEST_CASE("spawn will execute its work", "[async_scope][spawn]") {
   impulse_scheduler sch;
   bool executed{false};
   async_scope context;
-  exec::satisfies<exec::async_nester> auto scope = context.get_nester();
+  exec::satisfies<exec::async_nester> auto scope = exec::async_resource.get_resource_token(context);
 
   // Non-blocking call
   exec::async_nester.spawn(scope, ex::on(sch, ex::just() | ex::then([&] { executed = true; })));
@@ -52,7 +52,7 @@ TEST_CASE("spawn will execute its work", "[async_scope][spawn]") {
 TEST_CASE("spawn will start sender before returning", "[async_scope][spawn]") {
   bool executed{false};
   async_scope context;
-  exec::satisfies<exec::async_nester> auto scope = context.get_nester();
+  exec::satisfies<exec::async_nester> auto scope = exec::async_resource.get_resource_token(context);
 
   // This will be a blocking call
   exec::async_nester.spawn(scope, ex::just() | ex::then([&] { executed = true; }));
@@ -64,7 +64,7 @@ TEST_CASE(
   "spawn will propagate exceptions encountered during op creation", 
   "[async_scope][spawn]") {
   async_scope context;
-  exec::satisfies<exec::async_nester> auto scope = context.get_nester();
+  exec::satisfies<exec::async_nester> auto scope = exec::async_resource.get_resource_token(context);
   try {
     exec::async_nester.spawn(scope, throwing_sender{} | ex::then([&] { FAIL("work should not be executed"); }));
     FAIL("Exceptions should have been thrown");
@@ -82,7 +82,7 @@ TEST_CASE(
   impulse_scheduler sch;
   bool executed{false};
   async_scope context;
-  exec::satisfies<exec::async_nester> auto scope = context.get_nester();
+  exec::satisfies<exec::async_nester> auto scope = exec::async_resource.get_resource_token(context);
 
   // Before adding any operations, the scope is empty
   // TODO: reenable this
@@ -112,7 +112,7 @@ TEST_CASE(
   impulse_scheduler sch;
   std::size_t num_executed{0};
   async_scope context;
-  exec::satisfies<exec::async_nester> auto scope = context.get_nester();
+  exec::satisfies<exec::async_nester> auto scope = exec::async_resource.get_resource_token(context);
 
   // Before adding any operations, the scope is empty
   // TODO: reenable this
@@ -146,7 +146,7 @@ TEST_CASE(
 TEST_CASE("TODO: spawn work can be cancelled by cancelling the scope", "[async_scope][spawn]") {
   impulse_scheduler sch;
   async_scope context;
-  exec::satisfies<exec::async_nester> auto scope = context.get_nester();
+  exec::satisfies<exec::async_nester> auto scope = exec::async_resource.get_resource_token(context);
 
   bool cancelled1{false};
   bool cancelled2{false};
@@ -222,7 +222,7 @@ TEST_CASE(
   "[async_scope][spawn]") {
   impulse_scheduler sch;
   async_scope context;
-  exec::satisfies<exec::async_nester> auto scope = context.get_nester();
+  exec::satisfies<exec::async_nester> auto scope = exec::async_resource.get_resource_token(context);
 
   // TODO: reenable this
   // REQUIRE(P2519::__scope::empty(scope));
