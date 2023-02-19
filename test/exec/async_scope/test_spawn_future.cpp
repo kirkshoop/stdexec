@@ -434,7 +434,7 @@ concept is_spawn_future_worthy =
     requires(
       S&& snd, 
       async_scope_context& context, 
-      exec::async_scope_t::token_t scope) { 
+      exec::async_scope_context::token_t scope) { 
         exec::async_scope.spawn_future(scope, std::move(snd)); 
       };
 

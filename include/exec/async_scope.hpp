@@ -66,8 +66,6 @@ namespace exec {
       }
     };
 
-    struct __async_scope;
-
     struct async_scope_t {
       template<class _T>
         requires 
@@ -77,7 +75,6 @@ namespace exec {
             spawn_future_t{}(__t, just());
           }
         inline constexpr bool satisfies() const {return true;}
-      using token_t = __async_scope;
       using nest_t = __scope::nest_t;
       inline static constexpr nest_t nest{};
       using spawn_t = __scope::spawn_t;
@@ -813,6 +810,8 @@ namespace exec {
     // async_scope_context
     struct async_scope_context : __immovable {
       async_scope_context() = default;
+
+      using token_t = __async_scope;
 
       [[deprecated]] in_place_stop_source& get_stop_source() noexcept {
         return __impl_.__stop_source_;
