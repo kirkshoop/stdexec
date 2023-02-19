@@ -44,7 +44,7 @@
 
 // Pull in the reference implementation of P2300:
 #include <stdexec/execution.hpp>
-// Keep track of spawned work in an async_scope:
+// Keep track of spawned work in an async_scope_context:
 #include <exec/async_scope.hpp>
 // Use a thread pool
 #include "exec/static_thread_pool.hpp"
@@ -171,8 +171,8 @@ ex::sender auto handle_classify_request(const http_request& req) {
 
 int main() {
   // Create a thread pool and get a scheduler from it
-  exec::async_scope context;
-  exec::satisfies<exec::async_nester> auto scope = exec::async_resource.get_resource_token(context);
+  exec::async_scope_context context;
+  exec::satisfies<exec::async_scope> auto scope = exec::async_resource.get_resource_token(context);
   exec::static_thread_pool pool{8};
   ex::scheduler auto sched = pool.get_scheduler();
 
@@ -201,9 +201,9 @@ int main() {
           oss << "Sending response: " << resp.status_code_ << " / " << resp.body_ << "\n";
           std::cout << oss.str();
         });
-    exec::async_nester.spawn(scope, ex::on(sched, std::move(action)));
+    exec::async_scope.spawn(scope, ex::on(sched, std::move(action)));
   }
 
-  stdexec::sync_wait(context.on_empty());
+  stdexec::sync_wait(exec::async_resource.close(context));
   pool.request_stop();
 }

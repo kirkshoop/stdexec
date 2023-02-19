@@ -29,117 +29,91 @@
 namespace ex = stdexec;
 
 namespace {
-void expect_empty(exec::async_scope& context) {
+void expect_empty(exec::async_scope_context& context) {
   ex::run_loop loop;
   ex::scheduler auto sch = loop.get_scheduler();
   CHECK_FALSE(stdexec::execute_may_block_caller(sch));
   auto op = ex::connect(
-    ex::then(context.on_empty(), [&](){ loop.finish(); }),
+    ex::then(exec::async_resource.close(context), [&](){ loop.finish(); }),
     expect_void_receiver{exec::make_env(exec::with(ex::get_scheduler, sch))});
   ex::start(op);
   loop.run();
 }
 } // namespace
 
-TEST_CASE("async_scope will complete", "[types][type_async_scope]") {
+TEST_CASE("async_scope_context will complete", "[types][type_async_scope_context]") {
   exec::static_thread_pool ctx{1};
 
   ex::scheduler auto sch = ctx.get_scheduler();
 
   SECTION("after construction") {
-    exec::async_scope context;
+    exec::async_scope_context context;
     expect_empty(context);
   }
 
   SECTION("after spawn") {
-    exec::async_scope context;
-    exec::satisfies<exec::async_nester> auto scope = exec::async_resource.get_resource_token(context);
+    exec::async_scope_context context;
+    exec::satisfies<exec::async_scope> auto scope = exec::async_resource.get_resource_token(context);
     ex::sender auto begin = ex::schedule(sch);
-    exec::async_nester.spawn(scope, begin);
-    stdexec::sync_wait(context.on_empty());
+    exec::async_scope.spawn(scope, begin);
+    stdexec::sync_wait(exec::async_resource.close(context));
     expect_empty(context);
   }
 
   SECTION("after nest result discarded") {
-    exec::async_scope context;
-    exec::satisfies<exec::async_nester> auto scope = exec::async_resource.get_resource_token(context);
+    exec::async_scope_context context;
+    exec::satisfies<exec::async_scope> auto scope = exec::async_resource.get_resource_token(context);
     ex::sender auto begin = ex::schedule(sch);
     {
-      ex::sender auto nst = exec::async_nester.nest(scope, begin); 
+      ex::sender auto nst = exec::async_scope.nest(scope, begin); 
       (void)nst;
     }
-    stdexec::sync_wait(context.on_empty());
+    stdexec::sync_wait(exec::async_resource.close(context));
     expect_empty(context);
   }
 
   SECTION("after nest result started") {
-    exec::async_scope context;
-    exec::satisfies<exec::async_nester> auto scope = exec::async_resource.get_resource_token(context);
+    exec::async_scope_context context;
+    exec::satisfies<exec::async_scope> auto scope = exec::async_resource.get_resource_token(context);
     ex::sender auto begin = ex::schedule(sch);
-    ex::sender auto nst = exec::async_nester.nest(scope, begin);
+    ex::sender auto nst = exec::async_scope.nest(scope, begin);
     auto op = ex::connect(std::move(nst), expect_void_receiver{});
     ex::start(op);
-    stdexec::sync_wait(context.on_empty());
+    stdexec::sync_wait(exec::async_resource.close(context));
     expect_empty(context);
   }
 
   SECTION("after spawn_future result discarded") {
     exec::static_thread_pool ctx{1};
-    exec::async_scope context;
-    exec::satisfies<exec::async_nester> auto scope = exec::async_resource.get_resource_token(context);
+    exec::async_scope_context context;
+    exec::satisfies<exec::async_scope> auto scope = exec::async_resource.get_resource_token(context);
     std::atomic_bool produced{false};
     ex::sender auto begin = ex::schedule(sch);
     {
-      ex::sender auto ftr = exec::async_nester.spawn_future(scope, begin | stdexec::then([&](){produced = true;})); 
+      ex::sender auto ftr = exec::async_scope.spawn_future(
+        scope, 
+        begin | stdexec::then([&](){produced = true;})); 
       (void)ftr;
     }
-    stdexec::sync_wait(
-      context.on_empty() | stdexec::then([&](){STDEXEC_ASSERT(produced.load());}));
+    stdexec::sync_wait(exec::async_resource.close(context) | stdexec::then([&](){STDEXEC_ASSERT(produced.load());}));
     expect_empty(context);
   }
 
   SECTION("after spawn_future result started") {
     exec::static_thread_pool ctx{1};
-    exec::async_scope context;
-    exec::satisfies<exec::async_nester> auto scope = exec::async_resource.get_resource_token(context);
+    exec::async_scope_context context;
+    exec::satisfies<exec::async_scope> auto scope = exec::async_resource.get_resource_token(context);
     std::atomic_bool produced{false};
     ex::sender auto begin = ex::schedule(sch);
-    ex::sender auto ftr = exec::async_nester.spawn_future(scope, begin | stdexec::then([&](){produced = true;}));
-    stdexec::sync_wait(
-      context.on_empty() | stdexec::then([&](){STDEXEC_ASSERT(produced.load());}));
+    ex::sender auto ftr = exec::async_scope.spawn_future(
+      scope, 
+      begin | stdexec::then([&](){produced = true;}));
+    stdexec::sync_wait(exec::async_resource.close(context) 
+    | stdexec::then([&](){STDEXEC_ASSERT(produced.load());}));
     auto op = ex::connect(std::move(ftr), expect_void_receiver{});
     ex::start(op);
-    stdexec::sync_wait(context.on_empty());
+    stdexec::sync_wait(exec::async_resource.close(context));
     expect_empty(context);
-  }
-}
-
-TEST_CASE("enter_async_scope will complete", "[types][type_async_scope]") {
-  exec::static_thread_pool ctx{2};
-
-  ex::scheduler auto sch = ctx.get_scheduler();
-
-  SECTION("after nest result started") {
-    ex::sender auto scoped = exec::enter_async_scope([sch](exec::satisfies<exec::async_nester> auto scope) {
-      ex::sender auto delay = ex::schedule(sch)
-      | ex::then([](){std::this_thread::sleep_for(std::chrono::milliseconds(200));});
-      for (int i = 5; i >= 0; --i) {
-        exec::async_nester.spawn(scope, delay);
-      }
-
-      ex::sender auto answer = ex::schedule(sch)
-      | ex::then([](){return 42;});
-      return ex::when_all(
-        exec::async_nester.nest(scope, answer),
-        exec::async_nester.nest(scope, answer),
-        exec::async_nester.nest(scope, answer));
-
-    })
-    | ex::then([](int a, int b, int c){ return a-b+c; });
-    auto res = stdexec::sync_wait(scoped);
-    REQUIRE(res.has_value());
-    auto [v] = res.value();
-    CHECK(v == 42);
   }
 }
 

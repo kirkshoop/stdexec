@@ -5,43 +5,52 @@
 #include "exec/single_thread_context.hpp"
 
 namespace ex = stdexec;
-using exec::async_scope;
+using exec::async_scope_context;
 using stdexec::sync_wait;
 
-TEST_CASE("calling request_stop will be visible in stop_source", "[async_scope][stop]") {
-  async_scope scope;
+TEST_CASE("calling request_stop will be visible in stop_source", "[async_scope_context][stop]") {
+  async_scope_context scope;
 
   scope.request_stop();
   REQUIRE(scope.get_stop_source().stop_requested());
 }
-
-TEST_CASE("calling request_stop will be visible in stop_token", "[async_scope][stop]") {
-  async_scope scope;
+TEST_CASE(
+  "calling request_stop will be visible in stop_token", 
+  "[async_scope_context][stop]") {
+  async_scope_context scope;
 
   scope.request_stop();
   REQUIRE(scope.get_stop_token().stop_requested());
 }
 
 TEST_CASE(
-  "cancelling the associated stop_source will cancel the async_scope object",
-  "[async_scope][stop]") {
+  "cancelling the associated stop_source will cancel the async_scope_context object",
+  "[async_scope_context][stop]") {
   bool empty = false;
 
   {
     impulse_scheduler sch;
-    async_scope context;
-    exec::satisfies<exec::async_nester> auto scope = exec::async_resource.get_resource_token(context);
+    async_scope_context context;
+    exec::satisfies<exec::async_scope> auto scope = exec::async_resource.get_resource_token(context);
     bool called = false;
 
     // put work in the scope
-    exec::async_nester.spawn(
-      scope, ex::on(sch, ex::just()) | ex::upon_stopped([&]{ called = true; }));
+    exec::async_scope.spawn(
+      scope, 
+      ex::on(
+        sch, 
+        ex::just())
+          | ex::upon_stopped([&]{ called = true; }));
     REQUIRE_FALSE(called);
 
     // start a thread waiting on when the scope is empty:
     exec::single_thread_context thread;
     auto thread_sch = thread.get_scheduler();
-    ex::start_detached(ex::on(thread_sch, context.on_empty()) | ex::then([&]{ empty = true; }));
+    ex::start_detached(
+      ex::on(
+        thread_sch, 
+        exec::async_resource.close(context))
+          | ex::then([&]{ empty = true; }));
     REQUIRE_FALSE(empty);
 
     // request the scope stop
@@ -58,9 +67,9 @@ TEST_CASE(
 }
 
 TEST_CASE(
-  "cancelling the associated stop_source will be visible in stop_token",
-  "[async_scope][stop]") {
-  async_scope scope;
+  "cancelling the associated stop_source will be visible in stop_token", 
+  "[async_scope_context][stop]") {
+  async_scope_context scope;
 
   scope.get_stop_source().request_stop();
   REQUIRE(scope.get_stop_token().stop_requested());

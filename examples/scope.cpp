@@ -48,7 +48,7 @@ class noop_receiver : receiver_adaptor<noop_receiver> {
 
 int main() {
   exec::static_thread_pool ctx{1};
-  exec::async_scope context;
+  exec::async_scope_context context;
   auto scope = exec::async_resource.get_resource_token(context);
 
   scheduler auto sch = ctx.get_scheduler(); // 1
@@ -57,16 +57,18 @@ int main() {
 
   sender auto printVoid = then(begin, []() noexcept { printf("void\n"); }); // 3
 
-  sender auto printEmpty = then(on(sch, context.on_empty()), []() noexcept {
-    printf("scope is empty\n");
-  }); // 4
+  sender auto printEmpty = then(
+    on(sch, exec::async_resource.close(context)),
+      []()noexcept{ 
+        printf("scope is empty\n"); 
+      }); // 4
 
   printf(
     "\n"
     "spawn void\n"
     "==========\n");
 
-  exec::async_nester.spawn(scope, printVoid); // 5
+  exec::async_scope.spawn(scope, printVoid); // 5
 
   sync_wait(printEmpty);
 
@@ -77,9 +79,9 @@ int main() {
 
   sender auto fortyTwo = then(begin, []() noexcept { return 42; }); // 6
 
-  exec::async_nester.spawn(scope, printVoid); // 7
+  exec::async_scope.spawn(scope, printVoid); // 7
 
-  sender auto fortyTwoFuture = exec::async_nester.spawn_future(scope, fortyTwo); // 8
+  sender auto fortyTwoFuture = exec::async_scope.spawn_future(scope, fortyTwo); // 8
 
   sender auto printFortyTwo = then(std::move(fortyTwoFuture), [](int fortyTwo) noexcept {
     printf("%d\n", fortyTwo);
@@ -92,21 +94,21 @@ int main() {
   sync_wait(std::move(allDone));
 
   {
-    sender auto nest = exec::async_nester.nest(scope, begin);
+    sender auto nest = exec::async_scope.nest(scope, begin);
     (void)nest;
   }
-  sync_wait(context.on_empty());
+  sync_wait(exec::async_resource.close(context));
 
   {
-    sender auto nest = exec::async_nester.nest(scope, begin);
+    sender auto nest = exec::async_scope.nest(scope, begin);
     auto op = connect(std::move(nest), noop_receiver{});
     (void) op;
   }
-  sync_wait(context.on_empty());
+  sync_wait(exec::async_resource.close(context));
 
   {
-    sender auto nest = exec::async_nester.nest(scope, begin);
+    sender auto nest = exec::async_scope.nest(scope, begin);
     sync_wait(std::move(nest));
   }
-  sync_wait(context.on_empty());
+  sync_wait(exec::async_resource.close(context));
 }

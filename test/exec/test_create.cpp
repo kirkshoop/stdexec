@@ -29,21 +29,22 @@ namespace {
   struct immovable {
     immovable() = default;
     immovable(immovable&&) = delete;
+    immovable& operator=(immovable&&) = delete;
   };
 
   struct create_test_fixture {
     exec::static_thread_pool pool_{2};
-    exec::async_scope context_;
+    exec::async_scope_context context_;
 
     ~create_test_fixture() {
-      stdexec::sync_wait(context_.on_empty());
+      stdexec::sync_wait(exec::async_resource.close(context_));
     }
 
     void anIntAPI(int a, int b, void* context, void (*completed)(void* context, int result)) {
       // Execute some work asynchronously on some other thread. When its
       // work is finished, pass the result to the callback.
-      exec::satisfies<exec::async_nester> auto scope = exec::async_resource.get_resource_token(context_);
-      exec::async_nester.spawn(
+      exec::satisfies<exec::async_scope> auto scope = exec::async_resource.get_resource_token(context_);
+      exec::async_scope.spawn(
         scope,
         ex::on(
           pool_.get_scheduler(),
@@ -58,8 +59,8 @@ namespace {
     void aVoidAPI(void* context, void (*completed)(void* context)) {
       // Execute some work asynchronously on some other thread. When its
       // work is finished, pass the result to the callback.
-      exec::satisfies<exec::async_nester> auto scope = exec::async_resource.get_resource_token(context_);
-      exec::async_nester.spawn(
+      exec::satisfies<exec::async_scope> auto scope = exec::async_resource.get_resource_token(context_);
+      exec::async_scope.spawn(
         scope,
         ex::on(
           pool_.get_scheduler(),
