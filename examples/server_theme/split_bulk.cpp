@@ -169,47 +169,49 @@ int main() {
   // Create a thread pool and get a scheduler from it
   exec::static_thread_pool pool{8};
   exec::async_scope_context context;
-  exec::satisfies<exec::async_scope> auto scope = exec::async_resource.get_resource_token(context);
-  ex::scheduler auto sched = pool.get_scheduler();
+  auto use = exec::async_resource.open(context) | 
+    stdexec::let_value([&](exec::satisfies<exec::async_scope> auto scope){
+      ex::scheduler auto sched = pool.get_scheduler();
 
-  // Fake a couple of edge_detect requests
-  for (int i = 0; i < 3; i++) {
-    // Create a test request
-    http_request req{"/edge_detect", {}, "scene"};
+      // Fake a couple of edge_detect requests
+      for (int i = 0; i < 3; i++) {
+        // Create a test request
+        http_request req{"/edge_detect", {}, "scene"};
 
-    // The handler for the /edge_detect requests
-    ex::sender auto snd = handle_edge_detection_request(req);
+        // The handler for the /edge_detect requests
+        ex::sender auto snd = handle_edge_detection_request(req);
 
-    // Pack this into a simplified flow and execute it asynchronously
-    ex::sender auto action = 
-      std::move(snd) 
-      | ex::then([](http_response resp) {
-          std::ostringstream oss;
-          oss << "Sending response: " << resp.status_code_ << " / " << resp.body_ << "\n";
-          std::cout << oss.str();
-        });
-    exec::async_scope.spawn(scope, ex::on(sched, std::move(action)));
-  }
+        // Pack this into a simplified flow and execute it asynchronously
+        ex::sender auto action = 
+          std::move(snd) 
+          | ex::then([](http_response resp) {
+              std::ostringstream oss;
+              oss << "Sending response: " << resp.status_code_ << " / " << resp.body_ << "\n";
+              std::cout << oss.str();
+            });
+        exec::async_scope.spawn(scope, ex::on(sched, std::move(action)));
+      }
 
-  // Fake a couple of multi_blur requests
-  for (int i = 0; i < 3; i++) {
-    // Create a test request
-    http_request req{"/multi_blur", {}, "img1\nimg2\nimg3\nimg4\n"};
+      // Fake a couple of multi_blur requests
+      for (int i = 0; i < 3; i++) {
+        // Create a test request
+        http_request req{"/multi_blur", {}, "img1\nimg2\nimg3\nimg4\n"};
 
-    // The handler for the /edge_detect requests
-    ex::sender auto snd = handle_multi_blur_request(req);
+        // The handler for the /edge_detect requests
+        ex::sender auto snd = handle_multi_blur_request(req);
 
-    // Pack this into a simplified flow and execute it asynchronously
-    ex::sender auto action = 
-      std::move(snd) 
-      | ex::then([](http_response resp) {
-          std::ostringstream oss;
-          oss << "Sending response: " << resp.status_code_ << " / " << resp.body_ << "\n";
-          std::cout << oss.str();
-        });
-    exec::async_scope.spawn(scope, ex::on(sched, std::move(action)));
-  }
-
-  stdexec::sync_wait(exec::async_resource.close(context));
+        // Pack this into a simplified flow and execute it asynchronously
+        ex::sender auto action = 
+          std::move(snd) 
+          | ex::then([](http_response resp) {
+              std::ostringstream oss;
+              oss << "Sending response: " << resp.status_code_ << " / " << resp.body_ << "\n";
+              std::cout << oss.str();
+            });
+        exec::async_scope.spawn(scope, ex::on(sched, std::move(action)));
+      }
+      return exec::async_resource.close(context);
+    });
+  stdexec::sync_wait(use);
   pool.request_stop();
 }

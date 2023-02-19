@@ -90,7 +90,7 @@ namespace exec {
       using close_t = __resource::close_t;
       inline static constexpr close_t close{};
       using get_resource_token_t = __resource::get_resource_token_t;
-      inline static constexpr get_resource_token_t get_resource_token{};
+      [[deprecated]] inline static constexpr get_resource_token_t get_resource_token{};
     };
   } // namespace __resource
 

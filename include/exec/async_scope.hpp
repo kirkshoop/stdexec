@@ -66,6 +66,8 @@ namespace exec {
       }
     };
 
+    struct __async_scope;
+
     struct async_scope_t {
       template<class _T>
         requires 
@@ -75,6 +77,7 @@ namespace exec {
             spawn_future_t{}(__t, just());
           }
         inline constexpr bool satisfies() const {return true;}
+      using token_t = __async_scope;
       using nest_t = __scope::nest_t;
       inline static constexpr nest_t nest{};
       using spawn_t = __scope::spawn_t;
@@ -733,12 +736,78 @@ namespace exec {
           return __future_t<_Sender, _Env>{std::move(__state)};
         }
 
+      template <class _ReceiverId>
+        friend struct __open_op;
       friend struct async_scope_context;
       template <class _AdaptorId, class _ReceiverId>
         friend struct __async_scope_context_op;
-      __async_scope(__impl* __impl) noexcept : __impl_(__impl) {}
+      __async_scope(const __impl* __impl) noexcept : __impl_(const_cast<struct __impl*>(__impl)) {}
       __impl* __impl_;
     };
+
+    ////////////////////////////////////////////////////////////////////////////
+    // async_scope_context::open implementation
+    template <class _ReceiverId>
+      struct __open_op : __task {
+        using _Receiver = __t<_ReceiverId>;
+
+        explicit __open_op(const __impl* __scope, _Receiver __rcvr)
+          : __task{{}, __scope, __notify_waiter}
+          , __rcvr_((_Receiver&&)__rcvr)
+          , __tkn_(__async_scope{__scope}) {
+        }
+
+      private:
+        static void __notify_waiter(__task* __self) noexcept {
+          // open
+          __open_op& __that = *static_cast<__open_op*>(__self);
+          set_value((_Receiver&&)__that.__rcvr_, __that.__tkn_);
+        }
+
+        void __start_() noexcept {
+          std::unique_lock __guard{this->__scope_->__lock_};
+          auto& __active = this->__scope_->__active_;
+          auto& __waiters = this->__scope_->__waiters_;
+          if (__active != 0) {
+            __waiters.push_back(this);
+            return;
+          }
+          __guard.unlock();
+          // already open
+          set_value((_Receiver&&)this->__rcvr_, this->__tkn_);
+        }
+        friend void tag_invoke(start_t, __open_op& __self) noexcept {
+          return __self.__start_();
+        }
+        _Receiver __rcvr_;
+        __async_scope __tkn_;
+      };
+
+    template <class _Receiver>
+      using __open_op_t =
+        __open_op<__x<remove_cvref_t<_Receiver>>>;
+
+      struct __open_sender {
+        using is_sender = void;
+
+        template <__decays_to<__open_sender> _Self, receiver _Receiver>
+          [[nodiscard]] friend __open_op_t<_Receiver>
+          tag_invoke(connect_t, _Self&& __self, _Receiver __rcvr) {
+            return __open_op_t<_Receiver>{
+              __self.__scope_,
+              (_Receiver&&) __rcvr};
+          }
+
+        template <__decays_to<__open_sender> _Self, class _Env>
+          friend auto tag_invoke(get_completion_signatures_t, _Self&&, _Env)
+            -> completion_signatures<set_value_t(__async_scope)>;
+
+        friend empty_env tag_invoke(get_env_t, const __open_sender& __self) noexcept {
+          return {};
+        }
+
+        const __impl* __scope_;
+      };
 
     ////////////////////////////////////////////////////////////////////////////
     // async_scope_context
@@ -756,21 +825,11 @@ namespace exec {
       [[deprecated]] bool request_stop() noexcept {
         return __impl_.__stop_source_.request_stop();
       }
-
-      // [[deprecated]] [[nodiscard]] auto on_empty() const {
-      //   return close(just());
-      // }
     private:
-      // template <sender _Constrained>
-      // [[nodiscard]] __close_sender_t<_Constrained>
-      //   close(_Constrained&& __c) const {
-      //     return __close_sender_t<_Constrained>{&__impl_, (_Constrained&&) __c};
-      //   }
-
-      // friend __open_sender
-      // tag_invoke(async_resource_t::open_t, async_scope_context& __self) {
-      //   return __open_sender{&__self.__impl_};
-      // }
+      friend __open_sender
+      tag_invoke(async_resource_t::open_t, async_scope_context& __self) {
+        return __open_sender{&__self.__impl_};
+      }
 
       // friend __run_sender
       // tag_invoke(async_resource_t::run_t, async_scope_context& __self) {

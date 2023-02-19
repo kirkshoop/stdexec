@@ -92,31 +92,34 @@ int main() {
   std::array<std::byte, 16 * 1024> buffer;
 
   exec::async_scope_context context;
-  exec::satisfies<exec::async_scope> auto scope = exec::async_resource.get_resource_token(context);
+  auto use = exec::async_resource.open(context) | 
+    stdexec::let_value([&](exec::satisfies<exec::async_scope> auto scope){
 
-  // Fake a couple of requests
-  for (int i = 0; i < 10; i++) {
-    int sock = i;
-    auto buf = reinterpret_cast<char*>(&buffer[0]);
+      // Fake a couple of requests
+      for (int i = 0; i < 10; i++) {
+        int sock = i;
+        auto buf = reinterpret_cast<char*>(&buffer[0]);
 
-    // A sender that just calls the legacy read function
-    auto snd_read = ex::just(sock, buf, buffer.size()) | ex::then(legacy_read_from_socket);
-    // The entire flow
-    auto snd =
-      // start by reading data on the I/O thread
-      ex::on(io_sched, std::move(snd_read))
-      // do the processing on the worker threads pool
-      | ex::transfer(work_sched)
-      // process the incoming data (on worker threads)
-      | ex::then([buf](int read_len) { process_read_data(buf, read_len); })
-      // done
-      ;
+        // A sender that just calls the legacy read function
+        auto snd_read = ex::just(sock, buf, buffer.size()) | ex::then(legacy_read_from_socket);
+        // The entire flow
+        auto snd =
+          // start by reading data on the I/O thread
+          ex::on(io_sched, std::move(snd_read))
+          // do the processing on the worker threads pool
+          | ex::transfer(work_sched)
+          // process the incoming data (on worker threads)
+          | ex::then([buf](int read_len) { process_read_data(buf, read_len); })
+          // done
+          ;
 
-    // execute the whole flow asynchronously
-    exec::async_scope.spawn(scope, std::move(snd));
-  }
+        // execute the whole flow asynchronously
+        exec::async_scope.spawn(scope, std::move(snd));
+      }
+      return exec::async_resource.close(context);
+  });
 
-  (void) stdexec::sync_wait(exec::async_resource.close(context));
+  stdexec::sync_wait(use);
 
   return 0;
 }

@@ -19,14 +19,18 @@ TEST_CASE("async_scope_context destruction after spawning work into it", "[async
   std::atomic<int> counter{0};
   {
     async_scope_context context;
-    exec::satisfies<exec::async_scope> auto scope = exec::async_resource.get_resource_token(context);
+    auto use = exec::async_resource.open(context) | 
+      ex::let_value([&](exec::satisfies<exec::async_scope> auto scope){
 
-    // Add some work into the scope
-    for (int i = 0; i < 10; i++)
-      exec::async_scope.spawn(scope, ex::on(sch, ex::just() | ex::then([&] { counter++; })));
+        // Add some work into the scope
+        for (int i = 0; i < 10; i++)
+          exec::async_scope.spawn(scope, ex::on(sch, ex::just() | ex::then([&] { counter++; })));
+
+        return exec::async_resource.close(context);
+      });
 
     // Wait on the work, before calling destructor
-    sync_wait(exec::async_resource.close(context));
+    sync_wait(use);
   }
   // We should have all the work executed
   REQUIRE(counter == 10);

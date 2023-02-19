@@ -171,39 +171,42 @@ ex::sender auto handle_classify_request(const http_request& req) {
 
 int main() {
   // Create a thread pool and get a scheduler from it
-  exec::async_scope_context context;
-  exec::satisfies<exec::async_scope> auto scope = exec::async_resource.get_resource_token(context);
   exec::static_thread_pool pool{8};
   ex::scheduler auto sched = pool.get_scheduler();
 
-  // Fake a couple of requests
-  for (int i = 0; i < 12; i++) {
-    // Create a test request
-    const char* body = "";
-    if (i % 2 == 0)
-      body = "human";
-    else if (i % 3 == 0)
-      body = "cat";
-    else if (i % 5 == 0)
-      body = "dog";
-    else if (i % 7 == 0)
-      body = "bird";
-    http_request req{"/classify", {}, body};
+  exec::async_scope_context context;
+  auto use = exec::async_resource.open(context) | 
+    stdexec::let_value([&](exec::satisfies<exec::async_scope> auto scope){
 
-    // The handler for the "classify" requests
-    ex::sender auto snd = handle_classify_request(req);
+      // Fake a couple of requests
+      for (int i = 0; i < 12; i++) {
+        // Create a test request
+        const char* body = "";
+        if (i % 2 == 0)
+          body = "human";
+        else if (i % 3 == 0)
+          body = "cat";
+        else if (i % 5 == 0)
+          body = "dog";
+        else if (i % 7 == 0)
+          body = "bird";
+        http_request req{"/classify", {}, body};
 
-    // Pack this into a simplified flow and execute it asynchronously
-    ex::sender auto action = 
-      std::move(snd) 
-      | ex::then([](http_response resp) {
-          std::ostringstream oss;
-          oss << "Sending response: " << resp.status_code_ << " / " << resp.body_ << "\n";
-          std::cout << oss.str();
-        });
-    exec::async_scope.spawn(scope, ex::on(sched, std::move(action)));
-  }
+        // The handler for the "classify" requests
+        ex::sender auto snd = handle_classify_request(req);
 
-  stdexec::sync_wait(exec::async_resource.close(context));
+        // Pack this into a simplified flow and execute it asynchronously
+        ex::sender auto action = 
+          std::move(snd) 
+          | ex::then([](http_response resp) {
+              std::ostringstream oss;
+              oss << "Sending response: " << resp.status_code_ << " / " << resp.body_ << "\n";
+              std::cout << oss.str();
+            });
+        exec::async_scope.spawn(scope, ex::on(sched, std::move(action)));
+      }
+      return exec::async_resource.close(context);
+    });
+  stdexec::sync_wait(use);  
   pool.request_stop();
 }

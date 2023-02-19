@@ -26,12 +26,6 @@ using namespace std;
 namespace ex = stdexec;
 
 namespace {
-  struct immovable {
-    immovable() = default;
-    immovable(immovable&&) = delete;
-    immovable& operator=(immovable&&) = delete;
-  };
-
   struct create_test_fixture {
     exec::static_thread_pool pool_{2};
     exec::async_scope_context context_;

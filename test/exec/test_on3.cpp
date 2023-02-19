@@ -41,20 +41,26 @@ TEST_CASE("Can pass exec::on sender to ensure_started", "[adaptors][exec::on]") 
 
 TEST_CASE("Can pass exec::on sender to async_scope_context::spawn", "[adaptors][exec::on]") {
   exec::async_scope_context context;
-  exec::satisfies<exec::async_scope> auto scope = exec::async_resource.get_resource_token(context);
-  impulse_scheduler sched;
-  exec::async_scope.spawn(scope, exec::on(sched, ex::just()), env);
-  sched.start_next();
-  stdexec::sync_wait(exec::async_resource.close(context));
+  auto use = exec::async_resource.open(context) | 
+    ex::let_value([&](exec::satisfies<exec::async_scope> auto scope){
+      impulse_scheduler sched;
+      exec::async_scope.spawn(scope, exec::on(sched, ex::just()), env);
+      sched.start_next();
+      return exec::async_resource.close(context);
+    });
+  stdexec::sync_wait(use);
 }
 
 TEST_CASE("Can pass exec::on sender to async_scope_context::spawn_future", "[adaptors][exec::on]") {
   exec::async_scope_context context;
-  exec::satisfies<exec::async_scope> auto scope = exec::async_resource.get_resource_token(context);
-  impulse_scheduler sched;
-  auto fut = exec::async_scope.spawn_future(scope, exec::on(sched, ex::just(42)), env);
-  sched.start_next();
-  auto [i] = stdexec::sync_wait(std::move(fut)).value();
-  CHECK(i == 42);
-  stdexec::sync_wait(exec::async_resource.close(context));
+  auto use = exec::async_resource.open(context) | 
+    ex::let_value([&](exec::satisfies<exec::async_scope> auto scope){
+      impulse_scheduler sched;
+      auto fut = exec::async_scope.spawn_future(scope, exec::on(sched, ex::just(42)), env);
+      sched.start_next();
+      auto [i] = stdexec::sync_wait(std::move(fut)).value();
+      CHECK(i == 42);
+      return exec::async_resource.close(context);
+    });
+  stdexec::sync_wait(use);
 }

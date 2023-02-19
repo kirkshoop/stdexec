@@ -30,18 +30,20 @@ TEST_CASE(
 
   {
     impulse_scheduler sch;
-    async_scope_context context;
-    exec::satisfies<exec::async_scope> auto scope = exec::async_resource.get_resource_token(context);
     bool called = false;
+    async_scope_context context;
+    auto use = exec::async_resource.open(context) | 
+      ex::then([&](exec::satisfies<exec::async_scope> auto scope){
 
-    // put work in the scope
-    exec::async_scope.spawn(
-      scope, 
-      ex::on(
-        sch, 
-        ex::just())
-          | ex::upon_stopped([&]{ called = true; }));
-    REQUIRE_FALSE(called);
+        // put work in the scope
+        exec::async_scope.spawn(
+          scope, 
+          ex::on(
+            sch, 
+            ex::just())
+              | ex::upon_stopped([&]{ called = true; }));
+        REQUIRE_FALSE(called);
+      });
 
     // start a thread waiting on when the scope is empty:
     exec::single_thread_context thread;
