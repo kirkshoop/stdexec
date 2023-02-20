@@ -1126,11 +1126,6 @@ namespace exec {
       tag_invoke(async_resource_t::close_t, async_scope_context& __self) {
         return __close_sender{&__self.__impl_};
       }
-
-      friend __async_scope
-      tag_invoke(async_resource_t::get_resource_token_t, const async_scope_context& __self) {
-        return {&__self.__impl_};
-      }
     private:
       mutable __impl __impl_;
     };
