@@ -47,7 +47,7 @@ TEST_CASE("spawn will execute its work", "[async_scope_context][spawn]") {
 
       return exec::async_resource.close(context);
     });
-  auto op = ex::connect(std::move(use), expect_void_receiver{});
+  auto op = ex::connect(ex::when_all(std::move(use), exec::async_resource.run(context)), expect_void_receiver{});
   ex::start(op);
 
   // Run the operation on the scheduler
@@ -68,7 +68,7 @@ TEST_CASE("spawn will start sender before returning", "[async_scope_context][spa
 
       return exec::async_resource.close(context);
     });
-  sync_wait(use);
+  sync_wait(stdexec::when_all(use, exec::async_resource.run(context)));
 }
 
 #if !NO_TESTS_WITH_EXCEPTIONS
@@ -88,7 +88,7 @@ TEST_CASE(
       }
       return exec::async_resource.close(context);
     });
-  sync_wait(use);
+  sync_wait(stdexec::when_all(use, exec::async_resource.run(context)));
 }
 #endif
 
@@ -116,7 +116,7 @@ TEST_CASE(
 
       return exec::async_resource.close(context);
     });
-  auto op = ex::connect(std::move(use), expect_void_receiver{});
+  auto op = ex::connect(ex::when_all(std::move(use), exec::async_resource.run(context)), expect_void_receiver{});
   ex::start(op);
 
   // Run the operation on the scheduler; blocking call
@@ -152,7 +152,7 @@ TEST_CASE(
       }
       return exec::async_resource.close(context);
     });
-  auto op = ex::connect(std::move(use), expect_void_receiver{});
+  auto op = ex::connect(ex::when_all(std::move(use), exec::async_resource.run(context)), expect_void_receiver{});
   ex::start(op);
 
   // Now execute the operations
@@ -199,7 +199,7 @@ TEST_CASE("TODO: spawn work can be cancelled by cancelling the scope", "[async_s
 
       return exec::async_resource.close(context);
     });
-  auto op = ex::connect(std::move(use), expect_void_receiver{});
+  auto op = ex::connect(ex::when_all(std::move(use), exec::async_resource.run(context)), expect_void_receiver{});
   ex::start(op);
 
   // Execute the first operation, before cancelling
@@ -272,7 +272,7 @@ TEST_CASE(
 
       return exec::async_resource.close(context);
     });
-  auto op = ex::connect(std::move(use), expect_void_receiver{});
+  auto op = ex::connect(ex::when_all(std::move(use), exec::async_resource.run(context)), expect_void_receiver{});
   ex::start(op);
 
   // Run the operation on the scheduler; blocking call

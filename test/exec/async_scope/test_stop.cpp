@@ -45,6 +45,11 @@ TEST_CASE(
         REQUIRE_FALSE(called);
       });
 
+    auto op = ex::connect(exec::async_resource.run(context), expect_void_receiver{});
+    ex::start(op);
+
+    ex::sync_wait(std::move(use));
+
     // start a thread waiting on when the scope is empty:
     exec::single_thread_context thread;
     auto thread_sch = thread.get_scheduler();

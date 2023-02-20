@@ -20,6 +20,8 @@
 #include <exec/create.hpp>
 #include <exec/static_thread_pool.hpp>
 
+#include <test_common/receivers.hpp>
+
 #include <optional>
 
 using namespace std;
@@ -29,7 +31,17 @@ namespace {
   struct create_test_fixture {
     exec::static_thread_pool pool_{2};
     exec::async_scope_context context_;
+    ex::connect_result_t<
+      ex::__call_result_t<exec::async_resource_t::run_t, exec::async_scope_context&>,
+      expect_void_receiver<>> op_;
+    std::optional<exec::async_scope_context::token_t> scope_;
 
+    create_test_fixture() 
+      : op_{ex::connect(exec::async_resource.run(context_), expect_void_receiver{})} {
+      ex::start(op_);
+      auto [scope] = stdexec::sync_wait(exec::async_resource.open(context_)).value();
+      scope_ = scope;
+    }
     ~create_test_fixture() {
       stdexec::sync_wait(exec::async_resource.close(context_));
     }
@@ -37,9 +49,8 @@ namespace {
     void anIntAPI(int a, int b, void* context, void (*completed)(void* context, int result)) {
       // Execute some work asynchronously on some other thread. When its
       // work is finished, pass the result to the callback.
-      exec::satisfies<exec::async_scope> auto scope = exec::async_resource.get_resource_token(context_);
       exec::async_scope.spawn(
-        scope,
+        scope_.value(),
         ex::on(
           pool_.get_scheduler(),
           ex::then(ex::just(), [=]() noexcept {
@@ -53,9 +64,8 @@ namespace {
     void aVoidAPI(void* context, void (*completed)(void* context)) {
       // Execute some work asynchronously on some other thread. When its
       // work is finished, pass the result to the callback.
-      exec::satisfies<exec::async_scope> auto scope = exec::async_resource.get_resource_token(context_);
       exec::async_scope.spawn(
-        scope,
+        scope_.value(),
         ex::on(
           pool_.get_scheduler(),
           ex::then(ex::just(), [=]() noexcept {

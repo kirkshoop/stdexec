@@ -59,17 +59,12 @@ int main() {
       sender auto printVoid = then(begin,
         []()noexcept { printf("void\n"); }); // 3
 
-      sender auto printEmpty = then(on(sch, exec::async_resource.close(context)),
-        []()noexcept{ printf("scope is empty\n"); }); // 4
-
       printf(
         "\n"
         "spawn void\n"
         "==========\n");
 
       exec::async_scope.spawn(scope, printVoid); // 5
-
-      sync_wait(printEmpty);
 
       printf(
         "\n"
@@ -86,7 +81,7 @@ int main() {
         [](int fortyTwo)noexcept{ printf("%d\n", fortyTwo); }); // 9
 
       sender auto allDone = then(
-        when_all(printEmpty, std::move(printFortyTwo)),
+        when_all(printVoid, std::move(printFortyTwo)),
         [](auto&&...)noexcept{printf("\nall done\n");}); // 10
 
       sync_wait(std::move(allDone));
@@ -108,5 +103,5 @@ int main() {
       }
       return exec::async_resource.close(context);
     });
-  sync_wait(use);
+    sync_wait(when_all(use, exec::async_resource.run(context)));
 }

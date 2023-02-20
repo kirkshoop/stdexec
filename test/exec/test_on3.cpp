@@ -48,7 +48,7 @@ TEST_CASE("Can pass exec::on sender to async_scope_context::spawn", "[adaptors][
       sched.start_next();
       return exec::async_resource.close(context);
     });
-  stdexec::sync_wait(use);
+  stdexec::sync_wait(stdexec::when_all(use, exec::async_resource.run(context)));
 }
 
 TEST_CASE("Can pass exec::on sender to async_scope_context::spawn_future", "[adaptors][exec::on]") {
@@ -62,5 +62,5 @@ TEST_CASE("Can pass exec::on sender to async_scope_context::spawn_future", "[ada
       CHECK(i == 42);
       return exec::async_resource.close(context);
     });
-  stdexec::sync_wait(use);
+  stdexec::sync_wait(stdexec::when_all(use, exec::async_resource.run(context)));
 }

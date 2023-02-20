@@ -212,6 +212,6 @@ int main() {
       }
       return exec::async_resource.close(context);
     });
-  stdexec::sync_wait(use);
+  stdexec::sync_wait(stdexec::when_all(use, exec::async_resource.run(context)));
   pool.request_stop();
 }

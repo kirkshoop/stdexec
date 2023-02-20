@@ -44,7 +44,7 @@ TEST_CASE("async_scope_context will complete", "[types][type_async_scope_context
         ex::sender auto begin = ex::schedule(sch);
         exec::async_scope.spawn(scope, begin);
       });
-    auto op = ex::connect(std::move(use), expect_void_receiver{});
+    auto op = ex::connect(ex::when_all(exec::async_resource.run(context), std::move(use)), expect_void_receiver{});
     ex::start(op);
     stdexec::sync_wait(exec::async_resource.close(context));
   }
@@ -59,7 +59,7 @@ TEST_CASE("async_scope_context will complete", "[types][type_async_scope_context
           (void)nst;          
         }
       });
-    auto op = ex::connect(std::move(use), expect_void_receiver{});
+    auto op = ex::connect(ex::when_all(exec::async_resource.run(context), std::move(use)), expect_void_receiver{});
     ex::start(op);
     stdexec::sync_wait(exec::async_resource.close(context));
   }
@@ -72,18 +72,16 @@ TEST_CASE("async_scope_context will complete", "[types][type_async_scope_context
         ex::sender auto nst = exec::async_scope.nest(scope, begin);
         return nst;
       });
-    auto op = ex::connect(std::move(use), expect_void_receiver{});
+    auto op = ex::connect(ex::when_all(exec::async_resource.run(context), std::move(use)), expect_void_receiver{});
     ex::start(op);
     stdexec::sync_wait(exec::async_resource.close(context));
   }
 
   SECTION("after spawn_future result discarded") {
-    exec::static_thread_pool ctx{1};
     exec::async_scope_context context;
     std::atomic_bool produced{false};
     auto use = exec::async_resource.open(context) | 
       ex::then([&](exec::satisfies<exec::async_scope> auto scope){
-        std::atomic_bool produced{false};
         ex::sender auto begin = ex::schedule(sch);
         {
           ex::sender auto ftr = exec::async_scope.spawn_future(
@@ -92,13 +90,15 @@ TEST_CASE("async_scope_context will complete", "[types][type_async_scope_context
           (void)ftr;
         }
       });
-    auto op = ex::connect(std::move(use), expect_void_receiver{});
+    auto op = ex::connect(ex::when_all(exec::async_resource.run(context), std::move(use)), expect_void_receiver{});
     ex::start(op);
-    stdexec::sync_wait(exec::async_resource.close(context) | stdexec::then([&](){STDEXEC_ASSERT(produced.load());}));
+    stdexec::sync_wait(exec::async_resource.close(context) 
+    | stdexec::then([&](){
+        STDEXEC_ASSERT(produced.load());
+      }));
   }
 
   SECTION("after spawn_future result started") {
-    exec::static_thread_pool ctx{1};
     exec::async_scope_context context;
     std::atomic_bool produced{false};
     auto use = exec::async_resource.open(context) | 
@@ -109,9 +109,12 @@ TEST_CASE("async_scope_context will complete", "[types][type_async_scope_context
           begin | stdexec::then([&](){produced = true;}));
         return ftr;
       });
-    auto op = ex::connect(std::move(use), expect_void_receiver{});
+    auto op = ex::connect(ex::when_all(exec::async_resource.run(context), std::move(use)), expect_void_receiver{});
     ex::start(op);
-    stdexec::sync_wait(exec::async_resource.close(context) | stdexec::then([&](){STDEXEC_ASSERT(produced.load());}));
+    stdexec::sync_wait(exec::async_resource.close(context) 
+    | stdexec::then([&](){
+        STDEXEC_ASSERT(produced.load());
+      }));
   }
 }
 

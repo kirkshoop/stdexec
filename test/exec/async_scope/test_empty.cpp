@@ -28,7 +28,7 @@ TEST_CASE("empty sender can properly connect a void receiver", "[async_scope_con
 
       return snd;
     });
-  sync_wait(use);
+  sync_wait(stdexec::when_all(use, exec::async_resource.run(context)));
   REQUIRE(is_empty);
 }
 
@@ -43,7 +43,7 @@ TEST_CASE("empty will complete after the work is done", "[async_scope_context][e
       exec::async_scope.spawn(scope, ex::on(sch, ex::just() | ex::then([&] { is_done = true; })));
       // The close() sender cannot notify until the work completes
     });
-  auto op = ex::connect(std::move(use), expect_void_receiver{});
+  auto op = ex::connect(ex::when_all(exec::async_resource.run(context), std::move(use)), expect_void_receiver{});
   ex::start(op);
   REQUIRE_FALSE(is_done);
 
@@ -67,7 +67,7 @@ TEST_CASE("TODO: empty can be used multiple times", "[async_scope_context][empty
       exec::async_scope.spawn(scope, ex::on(sch, ex::just() | ex::then([&] { is_done = true; })));
       // The close() sender cannot notify until the work completes
     });
-  auto op = ex::connect(std::move(use), expect_void_receiver{});
+  auto op = ex::connect(ex::when_all(exec::async_resource.run(context), std::move(use)), expect_void_receiver{});
   ex::start(op);
   REQUIRE_FALSE(is_done);
 
@@ -121,7 +121,7 @@ TEST_CASE("waiting on work that spawns more work", "[async_scope_context][empty]
       // No work is executed until the impulse scheduler dictates
       exec::async_scope.spawn(scope, ex::on(sch, ex::just(scope) | ex::then(work2)));
     });
-  auto op = ex::connect(std::move(use), expect_void_receiver{});
+  auto op = ex::connect(ex::when_all(exec::async_resource.run(context), std::move(use)), expect_void_receiver{});
   ex::start(op);
   REQUIRE_FALSE(work1_done);
   REQUIRE_FALSE(work2_done);
@@ -174,15 +174,17 @@ TEST_CASE(
         | ex::then([&] { is_empty = true; });
       return snd;
     });
-  auto op = ex::connect(std::move(use), expect_void_receiver{});
+  auto op = ex::connect(exec::async_resource.run(context), expect_void_receiver{});
   ex::start(op);
   REQUIRE_FALSE(is_empty);
+
+  auto [snd] = ex::sync_wait(std::move(use)).value();
 
   REQUIRE_FALSE(work_executed);
   sch.start_next();
   REQUIRE(work_executed);
-  REQUIRE(is_empty);
 
-  sync_wait(exec::async_resource.close(context));
+  ex::sync_wait(std::move(snd));
+  REQUIRE(is_empty);
 }
 #endif

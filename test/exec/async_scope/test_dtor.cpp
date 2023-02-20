@@ -30,7 +30,7 @@ TEST_CASE("async_scope_context destruction after spawning work into it", "[async
       });
 
     // Wait on the work, before calling destructor
-    sync_wait(use);
+    sync_wait(stdexec::when_all(use, exec::async_resource.run(context)));
   }
   // We should have all the work executed
   REQUIRE(counter == 10);
