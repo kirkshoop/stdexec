@@ -247,9 +247,9 @@ namespace exec {
           (_Receiver&&) __rcvr};
       }
 
-      template <__decays_to<__when_empty_sender> _Self, class _Env>
+      template <__decays_to<__close_sender> _Self, class _Env>
       friend auto tag_invoke(get_completion_signatures_t, _Self&&, _Env)
-        -> completion_signatures_of_t<__copy_cvref_t<_Self, _Constrained>, __env_t<_Env>>;
+        -> completion_signatures<set_value_t()>;
 
       friend empty_env tag_invoke(get_env_t, const __close_sender& __self) noexcept {
         return {};
@@ -367,45 +367,26 @@ namespace exec {
       };
 
     template <class _ConstrainedId>
-      struct __nest_sender {
-        using _Constrained = __t<_ConstrainedId>;
-        using is_sender = void;
-
-        const __impl* __scope_;
-        [[no_unique_address]] _Constrained __c_;
-      private:
-        template <class _Self, class _Receiver>
-          using __nest_operation_t = __nest_op<__copy_cvref_t<_Self, _Constrained>, __x<_Receiver>>;
-        template <class _Receiver>
-          using __nest_receiver_t = __nest_rcvr<__x<_Receiver>>;
-
-        template <__decays_to<__nest_sender> _Self, receiver _Receiver>
-            requires sender_to<__copy_cvref_t<_Self, _Constrained>, __nest_receiver_t<_Receiver>>
-          [[nodiscard]] friend __nest_operation_t<_Self, _Receiver>
-          tag_invoke(connect_t, _Self&& __self, _Receiver __rcvr) {
-            return __nest_operation_t<_Self, _Receiver>{
-              __self.__scope_,
-              ((_Self&&) __self).__c_,
-              (_Receiver&&) __rcvr};
-          }
-        template <__decays_to<__nest_sender> _Self, class _Env>
-          friend auto tag_invoke(get_completion_signatures_t, _Self&&, _Env)
-            -> completion_signatures_of_t<__copy_cvref_t<_Self, _Constrained>, __env_t<_Env>>;
+    struct __nest_sender {
+      using _Constrained = __t<_ConstrainedId>;
+      using is_sender = void;
 
       const __impl* __scope_;
       [[no_unique_address]] _Constrained __c_;
-
-      template <class _Receiver>
-      using __nest_operation_t = __nest_op<_ConstrainedId, __x<_Receiver>>;
+    private:
+      template <class _Self, class _Receiver>
+      using __nest_operation_t = __nest_op<__copy_cvref_t<_Self, _Constrained>, __x<_Receiver>>;
       template <class _Receiver>
       using __nest_receiver_t = __nest_rcvr<__x<_Receiver>>;
 
       template <__decays_to<__nest_sender> _Self, receiver _Receiver>
         requires sender_to<__copy_cvref_t<_Self, _Constrained>, __nest_receiver_t<_Receiver>>
-      [[nodiscard]] friend __nest_operation_t<_Receiver>
-        tag_invoke(connect_t, _Self&& __self, _Receiver __rcvr) {
-        return __nest_operation_t<_Receiver>{
-          __self.__scope_, ((_Self&&) __self).__c_, (_Receiver&&) __rcvr};
+      [[nodiscard]] friend __nest_operation_t<_Self, _Receiver>
+      tag_invoke(connect_t, _Self&& __self, _Receiver __rcvr) {
+        return __nest_operation_t<_Self, _Receiver>{
+          __self.__scope_,
+          ((_Self&&) __self).__c_,
+          (_Receiver&&) __rcvr};
       }
       template <__decays_to<__nest_sender> _Self, class _Env>
       friend auto tag_invoke(get_completion_signatures_t, _Self&&, _Env)
