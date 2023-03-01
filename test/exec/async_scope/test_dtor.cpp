@@ -3,22 +3,22 @@
 #include "exec/static_thread_pool.hpp"
 
 namespace ex = stdexec;
-using exec::async_scope_context;
+using exec::counting_scope;
 using stdexec::sync_wait;
 
 TEST_CASE(
-  "async_scope_context can be created and them immediately destructed", 
-  "[async_scope_context][dtor]") {
-  async_scope_context scope;
+  "counting_scope can be created and them immediately destructed", 
+  "[counting_scope][dtor]") {
+  counting_scope scope;
   (void)scope;
 }
 
-TEST_CASE("async_scope_context destruction after spawning work into it", "[async_scope_context][dtor]") {
+TEST_CASE("counting_scope destruction after spawning work into it", "[counting_scope][dtor]") {
   exec::static_thread_pool pool{4};
   ex::scheduler auto sch = pool.get_scheduler();
   std::atomic<int> counter{0};
   {
-    async_scope_context context;
+    counting_scope context;
     auto use = exec::async_resource.open(context) | 
       ex::let_value([&](exec::satisfies<exec::async_scope> auto scope){
 
@@ -26,7 +26,7 @@ TEST_CASE("async_scope_context destruction after spawning work into it", "[async
         for (int i = 0; i < 10; i++)
           exec::async_scope.spawn(scope, ex::on(sch, ex::just() | ex::then([&] { counter++; })));
 
-        return exec::async_resource.close(context);
+        return exec::async_scope.close(scope);
       });
 
     // Wait on the work, before calling destructor

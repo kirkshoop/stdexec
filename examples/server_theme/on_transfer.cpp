@@ -90,10 +90,12 @@ int main() {
   ex::scheduler auto io_sched = io_pool.get_scheduler();
 
   std::array<std::byte, 16 * 1024> buffer;
-
-  exec::async_scope_context context;
+  // static_assert(exec::unique_location<typename exec::counting_scope::token_t>);
+  // static_assert(exec::satisfies<typename exec::counting_scope::token_t, exec::async_resource.token>);
+  static_assert(exec::satisfies<typename exec::counting_scope::token_t, exec::async_scope>);
+  exec::counting_scope context;
   auto use = exec::async_resource.open(context) | 
-    stdexec::let_value([&](exec::satisfies<exec::async_scope> auto scope){
+    stdexec::let_value([&](auto scope){
 
       // Fake a couple of requests
       for (int i = 0; i < 10; i++) {
@@ -116,10 +118,10 @@ int main() {
         // execute the whole flow asynchronously
         exec::async_scope.spawn(scope, std::move(snd));
       }
-      return exec::async_resource.close(context);
+      return exec::async_scope.close(scope);
   });
 
-  stdexec::sync_wait(stdexec::when_all(use, exec::async_resource.run(context)));
+  stdexec::sync_wait(stdexec::when_all(std::move(use), exec::async_resource.run(context)));
 
   return 0;
 }

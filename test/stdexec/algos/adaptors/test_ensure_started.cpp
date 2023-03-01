@@ -25,7 +25,7 @@
 #include <test_common/type_helpers.hpp>
 
 namespace ex = stdexec;
-using exec::async_scope_context;
+using exec::counting_scope;
 
 TEST_CASE("ensure_started returns a sender", "[adaptors][ensure_started]") {
   auto snd = ex::ensure_started(ex::just(19));

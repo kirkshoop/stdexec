@@ -42,7 +42,7 @@
 
 // Pull in the reference implementation of P2300:
 #include <stdexec/execution.hpp>
-// Keep track of spawned work in an async_scope_context:
+// Keep track of spawned work in an counting_scope:
 #include <exec/async_scope.hpp>
 // Use a thread pool
 #include "exec/static_thread_pool.hpp"
@@ -168,7 +168,7 @@ ex::sender auto handle_multi_blur_request(const http_request& req) {
 int main() {
   // Create a thread pool and get a scheduler from it
   exec::static_thread_pool pool{8};
-  exec::async_scope_context context;
+  exec::counting_scope context;
   auto use = exec::async_resource.open(context) | 
     stdexec::let_value([&](exec::satisfies<exec::async_scope> auto scope){
       ex::scheduler auto sched = pool.get_scheduler();
@@ -210,7 +210,7 @@ int main() {
             });
         exec::async_scope.spawn(scope, ex::on(sched, std::move(action)));
       }
-      return exec::async_resource.close(context);
+      return exec::async_scope.close(scope);
     });
   stdexec::sync_wait(stdexec::when_all(use, exec::async_resource.run(context)));
   pool.request_stop();

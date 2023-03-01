@@ -30,11 +30,11 @@ namespace ex = stdexec;
 namespace {
   struct create_test_fixture {
     exec::static_thread_pool pool_{2};
-    exec::async_scope_context context_;
+    exec::counting_scope context_;
     ex::connect_result_t<
-      ex::__call_result_t<exec::async_resource_t::run_t, exec::async_scope_context&>,
+      ex::__call_result_t<exec::async_resource_t::run_t, exec::counting_scope&>,
       expect_void_receiver<>> op_;
-    std::optional<exec::async_scope_context::token_t> scope_;
+    std::optional<exec::counting_scope::token_t> scope_;
 
     create_test_fixture() 
       : op_{ex::connect(exec::async_resource.run(context_), expect_void_receiver{})} {
@@ -43,7 +43,7 @@ namespace {
       scope_ = scope;
     }
     ~create_test_fixture() {
-      stdexec::sync_wait(exec::async_resource.close(context_));
+      stdexec::sync_wait(exec::async_scope.close(scope_.value()));
     }
 
     void anIntAPI(int a, int b, void* context, void (*completed)(void* context, int result)) {

@@ -23,24 +23,18 @@
 namespace exec {
 
   /////////////////////////////////////////////////////////////////////////////
-  // async_scope_context
+  // counting_scope
   namespace __scope {
     using namespace stdexec;
-
-    template <class _BaseEnv>
-      using __env_t =
-        make_env_t<
-          _BaseEnv,
-          with_t<get_stop_token_t, in_place_stop_token>>;
 
     struct nest_t {
       template <class _Fn, class _NestedSender>
         using __f = __minvoke<_Fn, _NestedSender>;
 
       template <class _AsyncScopeToken, class _NestedSender>
-        requires tag_invocable<nest_t, _AsyncScopeToken, _NestedSender>
-      [[nodiscard]] auto operator()(_AsyncScopeToken&& __tkn, _NestedSender&& __ns) const {
-        return tag_invoke(nest_t{}, (_AsyncScopeToken&&) __tkn, (_NestedSender&&) __ns);
+        requires tag_invocable<nest_t, const _AsyncScopeToken&, _NestedSender>
+      [[nodiscard]] auto operator()(const _AsyncScopeToken& __tkn, _NestedSender&& __ns) const {
+        return tag_invoke(nest_t{}, __tkn, (_NestedSender&&) __ns);
       }
     };
 
@@ -48,10 +42,10 @@ namespace exec {
       template <class _Fn, class _Env, class _NestedSender>
         using __f = __minvoke<_Fn, _Env, _NestedSender>;
 
-      template <class _AsyncScopeToken, __movable_value _Env = empty_env, sender<__env_t<_Env>> _NestedSender>
-        requires tag_invocable<spawn_t, _AsyncScopeToken, _NestedSender, _Env>
-      void operator()(_AsyncScopeToken&& __tkn, _NestedSender&& __ns, _Env __env = {}) const {
-        (void) tag_invoke(spawn_t{}, (_AsyncScopeToken&&) __tkn, (_NestedSender&&) __ns, (_Env&&) __env);
+      template <class _AsyncScopeToken, __movable_value _Env = empty_env, sender<_Env> _NestedSender>
+        requires tag_invocable<spawn_t, const _AsyncScopeToken&, _NestedSender, _Env>
+      void operator()(const _AsyncScopeToken& __tkn, _NestedSender&& __ns, _Env __env = {}) const {
+        (void) tag_invoke(spawn_t{}, __tkn, (_NestedSender&&) __ns, (_Env&&) __env);
       }
     };
 
@@ -59,102 +53,189 @@ namespace exec {
       template <class _Fn, class _Env, class _NestedSender>
         using __f = __minvoke<_Fn, _Env, _NestedSender>;
 
-      template <class _AsyncScopeToken, __movable_value _Env = empty_env, sender<__env_t<_Env>> _NestedSender>
-        requires tag_invocable<spawn_future_t, _AsyncScopeToken, _NestedSender, _Env>
-      auto operator()(_AsyncScopeToken&& __tkn, _NestedSender&& __ns, _Env __env = {}) const {
-        return tag_invoke(spawn_future_t{}, (_AsyncScopeToken&&) __tkn, (_NestedSender&&) __ns, (_Env&&) __env);
+      template <class _AsyncScopeToken, __movable_value _Env = empty_env, sender<_Env> _NestedSender>
+        requires tag_invocable<spawn_future_t, const _AsyncScopeToken&, _NestedSender, _Env>
+      auto operator()(const _AsyncScopeToken& __tkn, _NestedSender&& __ns, _Env __env = {}) const {
+        return tag_invoke(spawn_future_t{}, __tkn, (_NestedSender&&) __ns, (_Env&&) __env);
       }
     };
 
-    struct async_scope_t {
+    struct async_scope_t : async_resource_token_t {
       template<class _T>
         requires 
-          requires (_T __t){
-            nest_t{}(__t, just());
-            spawn_t{}(__t, just());
-            spawn_future_t{}(__t, just());
-          }
+          requires (const _T& __t_clv){
+            nest_t{}(__t_clv, just());
+            spawn_t{}(__t_clv, just());
+            spawn_future_t{}(__t_clv, just());
+          } //&&
+          // exec::satisfies<_T, exec::async_resource.token>
         inline constexpr bool satisfies() const {return true;}
+
       using nest_t = __scope::nest_t;
+      /// @brief nest() provides a sender that wraps the given sender 
+      /// @details The sender provided by nest() wraps the the given sender,  
+      /// such that once the returned sender is started, the async_scope 
+      /// is not closed until the given sender completes. 
+      /// @param resource-token&  
+      /// @returns sender
       inline static constexpr nest_t nest{};
+
       using spawn_t = __scope::spawn_t;
+      /// @brief spawn() eagerly starts the given sender 
+      /// @details The sender given to spawn() is wrapped using nest() and 
+      /// then that sender is connected to a receiver that provides the
+      /// environment returned by get_env(resource-token). The operation-state 
+      /// is stored on the heap using the allocator returned from get_allocator() 
+      /// provided on the environment returned by get_env(resource-token). 
+      /// @param resource-token&  
+      /// @returns void
       inline static constexpr spawn_t spawn{};
+
       using spawn_future_t = __scope::spawn_future_t;
+      /// @brief spawn_future() eagerly starts the given sender and returns a sender
+      /// @details The sender given to spawn_future() is wrapped using nest() and 
+      /// then that sender is connected to a receiver that provides the environment 
+      /// returned by get_env(*this). The operation-state and the state required to 
+      /// coordinate the completion of the given sender and the start of the returned 
+      /// sender, is stored on the heap using the allocator returned from get_allocator() 
+      /// on the environment returned by get_env(resource-token). 
+      /// @param resource-token&  
+      /// @returns sender
       inline static constexpr spawn_future_t spawn_future{};
     };
 
     enum class __phase {
       __invalid = 0,
       __constructed,
+      __pending,
       __opening,
       __running,
       __closing,
       __closed,
     };
 
+    struct __ctx;
     struct __impl;
-    struct async_scope_context;
+    struct counting_scope;
 
     struct __task : __immovable {
-      const __impl* __scope_;
-      void (*__notify_waiter)(__task*, __phase) noexcept;
+      mutable __ctx* __context_ = nullptr;
+      void (*__notify_waiter)(__task*, __phase) noexcept = nullptr;
       __task* __next_ = nullptr;
     };
 
-    struct __impl : __immovable {
+    struct __ctx : __immovable {
       using __phase = __scope::__phase;
-      in_place_stop_source __stop_source_{};
       mutable std::mutex __lock_{};
       mutable __phase __phase_ = __phase::__constructed;
-      mutable std::ptrdiff_t __active_ = 0;
-      mutable __intrusive_queue<&__task::__next_> __open_waiters_{};
-      mutable __task* __run_ = nullptr;
-      mutable __intrusive_queue<&__task::__next_> __close_waiters_{};
+      mutable __task* __open_ = nullptr;
+      mutable __impl* __impl_ = nullptr;
 
-      ~__impl() {
+      ~__ctx() {
         std::unique_lock __guard{__lock_};
+        // these help with debugging
         STDEXEC_ASSERT(__phase_ != __phase::__opening);
         STDEXEC_ASSERT(__phase_ != __phase::__running);
         STDEXEC_ASSERT(__phase_ != __phase::__closing);
+        // actual constraint
         STDEXEC_ASSERT(
           __phase_ == __phase::__constructed || 
           __phase_ == __phase::__closed);
+        STDEXEC_ASSERT(__open_ == nullptr);
+        STDEXEC_ASSERT(__impl_ == nullptr);
+      }
+    };
+
+    struct __impl : __immovable {
+      static void __shutdown(std::unique_lock<std::mutex>& __guard, const __impl* __scope) noexcept {
+        STDEXEC_ASSERT(__scope != nullptr);
+        STDEXEC_ASSERT(__scope->__context_ != nullptr);
+        STDEXEC_ASSERT(__scope->__context_->__impl_ != nullptr);
+
+        __task* __close = nullptr;        
+        if (__scope->__context_->__phase_ == __ctx::__phase::__closing){
+          __scope->__context_->__phase_ = __ctx::__phase::__closed;
+          __close = std::exchange(__scope->__close_, nullptr);
+        }
+
+        __task* __run = nullptr;
+        if (__scope->__context_->__phase_ == __ctx::__phase::__closed){
+          __run = std::exchange(__scope->__run_, nullptr);
+        }
+
+        auto __phase = __scope->__context_->__phase_;
+        __scope->__context_->__impl_ = nullptr;
+        __scope->__context_ = nullptr;
+        __scope = nullptr;
+        __guard.unlock();
+        // do not access __context 
+        if (__close != nullptr) {
+          __close->__notify_waiter(__close, __phase);
+          // __context must be considered deleted
+        }
+        if (__run != nullptr) {
+          __run->__notify_waiter(__run, __phase);
+        }
+      }
+
+      static void __complete(const __impl* __scope) noexcept {
+        STDEXEC_ASSERT(__scope != nullptr);
+        STDEXEC_ASSERT(__scope->__context_ != nullptr);
+        STDEXEC_ASSERT(__scope->__context_->__impl_ != nullptr);
+        std::unique_lock __guard{__scope->__context_->__lock_};
+        auto& __phase = __scope->__context_->__phase_;
+        auto& __active = __scope->__active_;
+        if (--__active == 0 && __phase == __ctx::__phase::__closing) {
+          __shutdown(__guard, __scope);
+          // do not access __scope 
+        }
+      }
+
+      mutable __ctx* __context_ = nullptr;
+      mutable std::ptrdiff_t __active_ = 0;
+      mutable __task* __run_ = nullptr;
+      mutable __task* __close_ = nullptr;
+
+      ~__impl() {
+        STDEXEC_ASSERT(__context_ == 0);
         STDEXEC_ASSERT(__active_ == 0);
-        STDEXEC_ASSERT(__open_waiters_.empty());
         STDEXEC_ASSERT(__run_ == nullptr);
-        STDEXEC_ASSERT(__close_waiters_.empty());
+        STDEXEC_ASSERT(__close_ == nullptr);
       }
     };
 
     ////////////////////////////////////////////////////////////////////////////
-    // async_scope_context::close implementation
+    // counting_scope::close implementation
     template <class _ReceiverId>
     struct __close_op : __task {
       using _Receiver = __t<_ReceiverId>;
 
-      explicit __close_op(const __impl* __scope, _Receiver __rcvr)
-        : __task{{}, __scope, __notify_waiter}, __rcvr_((_Receiver&&)__rcvr) {
+      explicit __close_op(__ctx* __context, _Receiver __rcvr)
+        : __task{{}, __context, __notify_waiter}, __rcvr_((_Receiver&&)__rcvr) {
       }
 
     private:
-      static void __notify_waiter(__task* __self, __impl::__phase __new_phase) noexcept {
+      static void __notify_waiter(__task* __self, __ctx::__phase __new_phase) noexcept {
         __close_op& __that = *static_cast<__close_op*>(__self);
         switch (__new_phase) {
-        case __impl::__phase::__constructed: 
+        case __ctx::__phase::__constructed: 
           // fallthrough
-        case __impl::__phase::__opening: 
+        case __ctx::__phase::__pending: 
           // fallthrough
-        case __impl::__phase::__running: 
+        case __ctx::__phase::__opening: 
           // fallthrough
-        case __impl::__phase::__closing: {
+        case __ctx::__phase::__running: 
+          // fallthrough
+        case __ctx::__phase::__closing: {
             constexpr bool phase_must_be_closed = false;
             STDEXEC_ASSERT(phase_must_be_closed);
             std::terminate();
           }
           break;
-        case __impl::__phase::__closed: {
+        case __ctx::__phase::__closed: {
             // closed
-            set_value((_Receiver&&)__that.__rcvr_);
+            _Receiver __rcvr{(_Receiver&&)__that.__rcvr_};
+            set_value((_Receiver&&)__rcvr);
           }
           break;
         default: {
@@ -166,54 +247,47 @@ namespace exec {
       }
 
       void __start_() noexcept {
-        std::unique_lock __guard{this->__scope_->__lock_};
-        auto& __phase = this->__scope_->__phase_;
+        STDEXEC_ASSERT(this->__context_ != nullptr);
+        STDEXEC_ASSERT(this->__context_->__impl_ != nullptr);
+        STDEXEC_ASSERT(this->__context_->__impl_->__context_ != nullptr);
+        std::unique_lock __guard{this->__context_->__lock_};
+        auto& __phase = this->__context_->__phase_;
         switch (__phase) {
-        case __impl::__phase::__constructed: 
+        case __ctx::__phase::__constructed: 
           // fallthrough
-        case __impl::__phase::__opening: {
-            auto __local = std::move(this->__scope_->__open_waiters_);
-            __guard.unlock();
-            while (!__local.empty()) {
-              auto* __next = __local.pop_front();
-              __next->__notify_waiter(__next, __impl::__phase::__closing);
+        case __ctx::__phase::__pending: 
+          // fallthrough
+        case __ctx::__phase::__opening: {
+            auto __open = std::exchange(this->__context_->__open_, nullptr);
+            if (__open != nullptr) {
+              __phase = __ctx::__phase::__closing;
+              __guard.unlock();
+              __open->__notify_waiter(__open, __ctx::__phase::__closing);
+              __guard.lock();
             }
-            __guard.lock();
           }
           // fallthrough
-        case __impl::__phase::__running: 
+        case __ctx::__phase::__running: 
           // fallthrough
-        case __impl::__phase::__closing: {
-            __phase = __impl::__phase::__closing;
+        case __ctx::__phase::__closing: {
+            __phase = __ctx::__phase::__closing;
 
-            auto& __active = this->__scope_->__active_;
-            auto& __close_waiters = this->__scope_->__close_waiters_;
+            auto& __active = this->__context_->__impl_->__active_;
+            auto& __close = this->__context_->__impl_->__close_;
+            STDEXEC_ASSERT(__close == nullptr);
+            __close = this;
             if (__active != 0) {
-              __close_waiters.push_back(this);
+              __guard.unlock();
               return;
             }
           }
           // fallthrough
-        case __impl::__phase::__closed: {
-            __phase = __impl::__phase::__closed;
-
-            auto __local = std::move(this->__scope_->__close_waiters_);
-            auto __run = this->__scope_->__active_ == 0 ? std::exchange(this->__scope_->__run_, nullptr) : nullptr;
-
-            __guard.unlock();
-            __scope_ = nullptr;
-            // do not access __scope
-            while (!__local.empty()) {
-              auto* __next = __local.pop_front();
-              __next->__notify_waiter(__next, __impl::__phase::__closed);
-              // __scope must be considered deleted
-            }
-
-            // already closed
-            set_value((_Receiver&&)__rcvr_);
-
-            if (__run != nullptr) {
-              __run->__notify_waiter(__run, __impl::__phase::__closed);
+        case __ctx::__phase::__closed: {
+            auto& __active = this->__context_->__impl_->__active_;
+            if (__active == 0) {
+              __impl::__shutdown(__guard, __context_->__impl_);
+              // do not access __context_
+              // __context must be considered deleted
             }
           }
           break;
@@ -243,7 +317,7 @@ namespace exec {
       [[nodiscard]] friend __close_op_t<_Receiver>
       tag_invoke(connect_t, _Self&& __self, _Receiver __rcvr) {
         return __close_op_t<_Receiver>{
-          __self.__scope_,
+          __self.__context_,
           (_Receiver&&) __rcvr};
       }
 
@@ -255,15 +329,15 @@ namespace exec {
         return {};
       }
 
-      const __impl* __scope_;
+      mutable __ctx* __context_;
     };
 
     ////////////////////////////////////////////////////////////////////////////
-    // async_scope_context::nest implementation
+    // counting_scope::nest implementation
     template <class _ReceiverId>
     struct __nest_op_base : __immovable {
       using _Receiver = __t<_ReceiverId>;
-      const __impl* __scope_;
+      const __ctx* __context_;
       [[no_unique_address]] _Receiver __rcvr_;
     };
 
@@ -272,45 +346,19 @@ namespace exec {
       using _Receiver = __t<_ReceiverId>;
       __nest_op_base<_ReceiverId>* __op_;
 
-      static void __complete(const __impl* __scope) noexcept {
-        std::unique_lock __guard{__scope->__lock_};
-        auto& __active = __scope->__active_;
-        if (--__active == 0) {
-          __task* __run = nullptr;
-          if (__scope->__phase_ == __impl::__phase::__closing){
-            __scope->__phase_ = __impl::__phase::__closed;
-            __run = std::exchange(__scope->__run_, nullptr);
-          }
-          auto __local = std::move(__scope->__close_waiters_);
-          __guard.unlock();
-          __scope = nullptr;
-          // do not access __scope
-          while (!__local.empty()) {
-            auto* __next = __local.pop_front();
-            __next->__notify_waiter(__next, __impl::__phase::__closed);
-            // __scope must be considered deleted
-          }
-          if (__run != nullptr) {
-            __run->__notify_waiter(__run, __impl::__phase::__closed);
-          }
-        }
-      }
-
       template < __one_of<set_value_t, set_error_t, set_stopped_t> _Tag, class... _As>
         requires __callable<_Tag, _Receiver, _As...>
       friend void tag_invoke(_Tag, __nest_rcvr&& __self, _As&&... __as) noexcept {
-        auto __scope = __self.__op_->__scope_;
+        auto __context = __self.__op_->__context_;
         _Tag{}(std::move(__self.__op_->__rcvr_), (_As&&) __as...);
         // do not access __op_
         // do not access this
-        __complete(__scope);
+        __impl::__complete(__context->__impl_);
       }
 
-      friend __env_t<env_of_t<_Receiver>>
+      friend env_of_t<_Receiver>
         tag_invoke(get_env_t, const __nest_rcvr& __self) noexcept {
-        return make_env(
-          get_env(__self.__op_->__rcvr_),
-          with(get_stop_token, __self.__op_->__scope_->__stop_source_.get_token()));
+        return get_env(__self.__op_->__rcvr_);
       }
     };
 
@@ -320,28 +368,30 @@ namespace exec {
         STDEXEC_IMMOVABLE_NO_UNIQUE_ADDRESS
           connect_result_t<_Constrained, __nest_rcvr<_ReceiverId>> __op_;
         template <__same_as<_Constrained> _Sender, __decays_to<_Receiver> _Rcvr>
-          explicit __nest_op(const __impl* __scope, _Sender&& __c, _Rcvr&& __rcvr)
-            : __nest_op_base<_ReceiverId>{{}, __scope, (_Rcvr&&) __rcvr}
+          explicit __nest_op(const __ctx* __context, _Sender&& __c, _Rcvr&& __rcvr)
+            : __nest_op_base<_ReceiverId>{{}, __context, (_Rcvr&&) __rcvr}
             , __op_(connect((_Sender&&) __c, __nest_rcvr<_ReceiverId>{this})) {}
       private:
         void __check_start_(std::unique_lock<std::mutex>& __guard) noexcept {
-          switch (this->__scope_->__phase_) {
-          case __impl::__phase::__constructed: 
+          switch (this->__context_->__phase_) {
+          case __ctx::__phase::__constructed: 
             // fallthrough
-          case __impl::__phase::__opening: {
+          case __ctx::__phase::__pending: 
+            // fallthrough
+          case __ctx::__phase::__opening: {
               __guard.unlock();
               constexpr bool phase_must_be_running_or_closing = false;
               STDEXEC_ASSERT(phase_must_be_running_or_closing);
               std::terminate();
             }
             break;
-          case __impl::__phase::__running: 
+          case __ctx::__phase::__running: 
             // fallthrough
-          case __impl::__phase::__closing: {
+          case __ctx::__phase::__closing: {
               // safe to start 
             }
             break;
-          case __impl::__phase::__closed: 
+          case __ctx::__phase::__closed: 
             // fallthrough
           default: {
               __guard.unlock();
@@ -353,10 +403,11 @@ namespace exec {
         }
 
         void __start_() noexcept {
-          STDEXEC_ASSERT(this->__scope_);
-          std::unique_lock __guard{this->__scope_->__lock_};
+          STDEXEC_ASSERT(this->__context_);
+          STDEXEC_ASSERT(this->__context_->__impl_);
+          std::unique_lock __guard{this->__context_->__lock_};
           __check_start_(__guard);
-          auto& __active = this->__scope_->__active_;
+          auto& __active = this->__context_->__impl_->__active_;
           ++__active;
           __guard.unlock();
           start(__op_);
@@ -371,7 +422,7 @@ namespace exec {
       using _Constrained = __t<_ConstrainedId>;
       using is_sender = void;
 
-      const __impl* __scope_;
+      const __ctx* __context_;
       [[no_unique_address]] _Constrained __c_;
     private:
       template <class _Self, class _Receiver>
@@ -384,13 +435,13 @@ namespace exec {
       [[nodiscard]] friend __nest_operation_t<_Self, _Receiver>
       tag_invoke(connect_t, _Self&& __self, _Receiver __rcvr) {
         return __nest_operation_t<_Self, _Receiver>{
-          __self.__scope_,
+          __self.__context_,
           ((_Self&&) __self).__c_,
           (_Receiver&&) __rcvr};
       }
       template <__decays_to<__nest_sender> _Self, class _Env>
       friend auto tag_invoke(get_completion_signatures_t, _Self&&, _Env)
-        -> completion_signatures_of_t<__copy_cvref_t<_Self, _Constrained>, __env_t<_Env>>;
+        -> completion_signatures_of_t<__copy_cvref_t<_Self, _Constrained>, _Env>;
 
       friend empty_env tag_invoke(get_env_t, const __nest_sender& __self) noexcept {
         return {};
@@ -401,7 +452,7 @@ namespace exec {
     using __nest_sender_t = __nest_sender<__x<remove_cvref_t<_Constrained>>>;
 
     ////////////////////////////////////////////////////////////////////////////
-    // async_scope_context::spawn_future implementation
+    // counting_scope::spawn_future implementation
     enum class __future_step {
       __invalid = 0,
       __created,
@@ -556,7 +607,7 @@ namespace exec {
     using __future_completions_t = //
       make_completion_signatures<
         _Sender,
-        __env_t<_Env>,
+        _Env,
         completion_signatures<set_stopped_t(), set_error_t(std::exception_ptr&&)>,
         __decay_values_t,
         __decay_error_t>;
@@ -595,10 +646,15 @@ namespace exec {
 
     template <class _Completions, class _Env>
     struct __future_state_base {
-      __future_state_base(_Env __env, const __impl* __scope)
-        : __forward_scope_{std::in_place, __scope->__stop_source_.get_token(), __forward_stopped{&__stop_source_}}
-        , __env_(
-            make_env((_Env&&) __env, with(get_stop_token, __scope->__stop_source_.get_token()))) {
+      __future_state_base(_Env __env, const __impl* __scope) 
+          requires same_as<in_place_stop_token, stop_token_of_t<_Env>>
+        : __forward_scope_{std::in_place, get_stop_token(__env), __forward_stopped{&__stop_source_}}
+        , __env_((_Env&&) __env) {
+      }
+      __future_state_base(_Env __env, const __impl* __scope) 
+          requires (!same_as<in_place_stop_token, stop_token_of_t<_Env>>)
+        : __forward_scope_{}
+        , __env_((_Env&&) __env) {
       }
 
       ~__future_state_base() {
@@ -628,7 +684,7 @@ namespace exec {
       std::unique_ptr<__future_state_base, __dynamic_delete<__future_state_base>> __no_future_;
       __completions_as_variant<_Completions> __data_;
       __intrusive_queue<&__subscription::__next_> __subscribers_;
-      __env_t<_Env> __env_;
+      _Env __env_;
     };
 
     template <class _CompletionsId, class _EnvId>
@@ -673,7 +729,7 @@ namespace exec {
         }
       }
 
-      friend const __env_t<_Env>& tag_invoke(get_env_t, const __future_rcvr& __self) noexcept {
+      friend const _Env& tag_invoke(get_env_t, const __future_rcvr& __self) noexcept {
         return __self.__state_->__env_;
       }
     };
@@ -751,11 +807,11 @@ namespace exec {
     using __future_t = __future<__x<__nest_sender_t<_Sender>>, __x<remove_cvref_t<_Env>>>;
 
     ////////////////////////////////////////////////////////////////////////////
-    // async_scope_context::spawn implementation
+    // counting_scope::spawn implementation
     template <class _EnvId>
     struct __spawn_op_base {
       using _Env = __t<_EnvId>;
-      __env_t<_Env> __env_;
+      _Env __env_;
       void (*__delete_)(__spawn_op_base*);
     };
 
@@ -776,7 +832,7 @@ namespace exec {
         std::terminate();
       }
 
-      friend const __env_t<_Env>& tag_invoke(get_env_t, const __spawn_rcvr& __self) noexcept {
+      friend const _Env& tag_invoke(get_env_t, const __spawn_rcvr& __self) noexcept {
         return __self.__op_->__env_;
       }
     };
@@ -791,8 +847,7 @@ namespace exec {
 
       template <__decays_to<_Sender> _Sndr>
       __spawn_op(_Sndr&& __sndr, _Env __env, const __impl* __scope)
-        : __spawn_op_base<_EnvId>{make_env((_Env&&) __env,
-                                    with(get_stop_token, __scope->__stop_source_.get_token())),
+        : __spawn_op_base<_EnvId>{(_Env&&) __env,
           [](__spawn_op_base<_EnvId>* __op) {
             delete static_cast<__spawn_op*>(__op);
           }}
@@ -820,107 +875,129 @@ namespace exec {
       using nest_result_t = __nest_sender_t<_Constrained>;
 
     private:
+      friend empty_env 
+      tag_invoke(get_env_t, const __async_scope& __self) noexcept {
+        return {};
+      }
+
+      friend __close_sender
+      tag_invoke(async_resource_token_t::close_t, const __async_scope& __self) {
+        return __close_sender{__self.__context_};
+      }
 
       template <sender _Constrained>
         friend nest_result_t<_Constrained>
-        tag_invoke(nest_t, __async_scope& __self, _Constrained&& __c) {
-          return nest_result_t<_Constrained>{__self.__impl_, (_Constrained&&) __c};
+        tag_invoke(nest_t, const __async_scope& __self, _Constrained&& __c) {
+          return nest_result_t<_Constrained>{__self.__context_, (_Constrained&&) __c};
         }
-      template <__movable_value _Env, sender<__env_t<_Env>> _Sender>
+      template <__movable_value _Env, sender<_Env> _Sender>
           requires sender_to<nest_result_t<_Sender>, __spawn_receiver_t<_Env>>
-        friend void tag_invoke(spawn_t, __async_scope& __self, _Sender&& __sndr, _Env&& __env) {
+        friend void tag_invoke(spawn_t, const __async_scope& __self, _Sender&& __sndr, _Env&& __env) {
           using __op_t = __spawn_operation_t<nest_result_t<_Sender>, _Env>;
           // start is noexcept so we can assume that the operation will complete
           // after this, which means we can rely on its self-ownership to ensure
           // that it is eventually deleted
-          stdexec::start(*new __op_t{nest_t{}(__self, (_Sender&&) __sndr), (_Env&&) __env, __self.__impl_});
+          stdexec::start(*new __op_t{nest_t{}(__self, (_Sender&&) __sndr), (_Env&&) __env, __self.__context_->__impl_});
         }
-      template <__movable_value _Env, sender<__env_t<_Env>> _Sender>
+      template <__movable_value _Env, sender<_Env> _Sender>
         friend __future_t<_Sender, _Env>
-        tag_invoke(spawn_future_t, __async_scope& __self, _Sender&& __sndr, _Env&& __env) {
+        tag_invoke(spawn_future_t, const __async_scope& __self, _Sender&& __sndr, _Env&& __env) {
           using __state_t = __future_state<nest_result_t<_Sender>, _Env>;
           auto __state =
-            std::make_unique<__state_t>(nest_t{}(__self, (_Sender&&) __sndr), (_Env&&) __env, __self.__impl_);
+            std::make_unique<__state_t>(nest_t{}(__self, (_Sender&&) __sndr), (_Env&&) __env, __self.__context_->__impl_);
           stdexec::start(__state->__op_);
           return __future_t<_Sender, _Env>{std::move(__state)};
         }
 
       template <class _ReceiverId>
         friend struct __open_op;
-      friend struct async_scope_context;
+      friend struct counting_scope;
       template <class _AdaptorId, class _ReceiverId>
-        friend struct __async_scope_context_op;
-      __async_scope(const __impl* __impl) noexcept : __impl_(const_cast<struct __impl*>(__impl)) {}
-      __impl* __impl_;
+        friend struct __counting_scope_op;
+      explicit __async_scope(__ctx* __context) noexcept : __context_(__context) {}
+      mutable __ctx* __context_;
     };
 
     ////////////////////////////////////////////////////////////////////////////
-    // async_scope_context::open implementation
+    // counting_scope::open implementation
     template <class _ReceiverId>
       struct __open_op : __task {
         using _Receiver = __t<_ReceiverId>;
 
-        explicit __open_op(const __impl* __scope, _Receiver __rcvr)
-          : __task{{}, __scope, __notify_waiter}
-          , __rcvr_((_Receiver&&)__rcvr)
-          , __tkn_(__async_scope{__scope}) {
+        explicit __open_op(__ctx* __context, _Receiver __rcvr)
+          : __task{{}, __context, __notify_waiter}
+          , __rcvr_((_Receiver&&)__rcvr) {
         }
 
       private:
-        static void __notify_waiter(__task* __self, __impl::__phase __new_phase) noexcept {
+        static void __notify_waiter(__task* __self, __ctx::__phase __new_phase) noexcept {
           __open_op& __that = *static_cast<__open_op*>(__self);
           switch (__new_phase) {
-          case __impl::__phase::__constructed: 
+          case __ctx::__phase::__constructed: 
             // fallthrough
-          case __impl::__phase::__opening: {
+          case __ctx::__phase::__pending:
+            // fallthrough
+          case __ctx::__phase::__opening: {
               constexpr bool phase_must_be_running_or_closing = false;
               STDEXEC_ASSERT(phase_must_be_running_or_closing);
               std::terminate();
             }
             break;
-          case __impl::__phase::__running: {
+          case __ctx::__phase::__running: {
               // open
-              set_value((_Receiver&&)__that.__rcvr_, __that.__tkn_);
+              _Receiver __rcvr{(_Receiver&&)__that.__rcvr_};
+              __async_scope __tkn{__that.__context_};
+              set_value((_Receiver&&)__rcvr, __tkn);
             }
             break;
-          case __impl::__phase::__closing: {
-              // stopped
-              set_stopped((_Receiver&&)__that.__rcvr_);
-            }
-            break;
-          case __impl::__phase::__closed: 
+          case __ctx::__phase::__closing: 
+            // fallthrough
+          case __ctx::__phase::__closed: 
             // fallthrough
           default: {
-              constexpr bool phase_must_be_running_or_closing = false;
-              STDEXEC_ASSERT(phase_must_be_running_or_closing);
+              constexpr bool phase_must_be_running = false;
+              STDEXEC_ASSERT(phase_must_be_running);
               std::terminate();
             }
           };
         }
 
         void __start_() noexcept {
-          std::unique_lock __guard{this->__scope_->__lock_};
-          auto& __phase = this->__scope_->__phase_;
+          STDEXEC_ASSERT(this->__context_ != nullptr);
+          STDEXEC_ASSERT(this->__context_->__impl_ != nullptr);
+          STDEXEC_ASSERT(this->__context_->__impl_->__context_ != nullptr);
+          std::unique_lock __guard{this->__context_->__lock_};
+          auto& __phase = this->__context_->__phase_;
           switch (__phase) {
-          case __impl::__phase::__constructed: 
-            // fallthrough
-          case __impl::__phase::__opening: {
-              __phase = __impl::__phase::__opening;
-
-              auto& __open_waiters = this->__scope_->__open_waiters_;
-              __open_waiters.push_back(this);
+          case __ctx::__phase::__constructed: {
+              __phase = __ctx::__phase::__opening;
+              auto& __open = this->__context_->__open_;
+              STDEXEC_ASSERT(__open == nullptr);
+              __open = this;
             }
-            __guard.unlock();
             return;
-          case __impl::__phase::__running: {
-              // already open
+          case __ctx::__phase::__opening: {
               __guard.unlock();
-              set_value((_Receiver&&)this->__rcvr_, this->__tkn_);
+              constexpr bool phase_must_be_constructed_or_pending_or_running = false;
+              STDEXEC_ASSERT(phase_must_be_constructed_or_pending_or_running);
+              std::terminate();
             }
             break;
-          case __impl::__phase::__closing: 
+          case __ctx::__phase::__pending: {
+              __phase = __ctx::__phase::__running;
+            }
             // fallthrough
-          case __impl::__phase::__closed: 
+          case __ctx::__phase::__running: {
+              // already open
+              _Receiver __rcvr{(_Receiver&&)this->__rcvr_};
+              __async_scope __tkn{this->__context_};
+              __guard.unlock();
+              set_value((_Receiver&&)__rcvr, __tkn);
+            }
+            break;
+          case __ctx::__phase::__closing: 
+            // fallthrough
+          case __ctx::__phase::__closed: 
             // fallthrough
           default: {
               __guard.unlock();
@@ -934,7 +1011,6 @@ namespace exec {
           return __self.__start_();
         }
         _Receiver __rcvr_;
-        __async_scope __tkn_;
       };
 
       template <class _Receiver>
@@ -948,7 +1024,7 @@ namespace exec {
           [[nodiscard]] friend __open_op_t<_Receiver>
           tag_invoke(connect_t, _Self&& __self, _Receiver __rcvr) {
             return __open_op_t<_Receiver>{
-              __self.__scope_,
+              __self.__context_,
               (_Receiver&&) __rcvr};
           }
 
@@ -960,39 +1036,45 @@ namespace exec {
           return {};
         }
 
-        const __impl* __scope_;
+        mutable __ctx* __context_;
       };
 
     ////////////////////////////////////////////////////////////////////////////
-    // async_scope_context::run implementation
+    // counting_scope::run implementation
     template <class _ReceiverId>
       struct __run_op : __task {
         using _Receiver = __t<_ReceiverId>;
 
-        explicit __run_op(const __impl* __scope, _Receiver __rcvr)
-          : __task{{}, __scope, __notify_waiter}
+        explicit __run_op(__ctx* __context, _Receiver __rcvr)
+          : __task{{}, __context, __notify_waiter}
           , __rcvr_((_Receiver&&)__rcvr) {
+            // cross-link __ctx and __impl
+            __context->__impl_ = &this->__impl_;
+            this->__impl_.__context_ = __context;
         }
 
       private:
-        static void __notify_waiter(__task* __self, __impl::__phase __new_phase) noexcept {
+        static void __notify_waiter(__task* __self, __ctx::__phase __new_phase) noexcept {
           __run_op& __that = *static_cast<__run_op*>(__self);
           switch (__new_phase) {
-          case __impl::__phase::__constructed: 
+          case __ctx::__phase::__constructed: 
             // fallthrough
-          case __impl::__phase::__opening: 
+          case __ctx::__phase::__pending: 
             // fallthrough
-          case __impl::__phase::__running: 
+          case __ctx::__phase::__opening: 
             // fallthrough
-          case __impl::__phase::__closing: {
+          case __ctx::__phase::__running: 
+            // fallthrough
+          case __ctx::__phase::__closing: {
               constexpr bool phase_must_be_closed = false;
               STDEXEC_ASSERT(phase_must_be_closed);
               std::terminate();
             }
             break;
-          case __impl::__phase::__closed: {
+          case __ctx::__phase::__closed: {
               // closed
-              set_value((_Receiver&&)__that.__rcvr_);
+              _Receiver __rcvr{(_Receiver&&)__that.__rcvr_};
+              set_value((_Receiver&&)__rcvr);
             }
             break;
           default: {
@@ -1004,35 +1086,47 @@ namespace exec {
         }
 
         void __start_() noexcept {
-          std::unique_lock __guard{this->__scope_->__lock_};
-          auto& __phase = this->__scope_->__phase_;
-          this->__scope_->__run_ = this;
+          STDEXEC_ASSERT(this->__context_ != nullptr);
+          STDEXEC_ASSERT(this->__context_->__impl_ != nullptr);
+          STDEXEC_ASSERT(this->__context_->__impl_->__context_ != nullptr);
+          std::unique_lock __guard{this->__context_->__lock_};
+          auto& __phase = this->__context_->__phase_;
+          STDEXEC_ASSERT(this->__impl_.__run_ == nullptr);
+          this->__impl_.__run_ = this;
           switch (__phase) {
-          case __impl::__phase::__constructed: {
-              __phase = __impl::__phase::__running;
+          case __ctx::__phase::__constructed: {
+              __phase = __ctx::__phase::__pending;
+              // open() will enter the __opening phase
             }
             __guard.unlock();
             break;
-          case __impl::__phase::__opening: 
-            // fallthrough
-          case __impl::__phase::__running: {
-              __phase = __impl::__phase::__running;
-
-              auto& __open_waiters = this->__scope_->__open_waiters_;
-              auto __local = std::move(__open_waiters);
-
+          case __ctx::__phase::__pending: {
               __guard.unlock();
-              while (!__local.empty()) {
-                auto* __next = __local.pop_front();
-                __next->__notify_waiter(__next, __impl::__phase::__running);
-              }
-              __guard.lock();
+              constexpr bool phase_must_be_constructed_or_opening_or_running = false;
+              STDEXEC_ASSERT(phase_must_be_constructed_or_opening_or_running);
+              std::terminate();
             }
             break;
-          case __impl::__phase::__closing: 
+          case __ctx::__phase::__opening: 
             // fallthrough
-          case __impl::__phase::__closed: 
+          case __ctx::__phase::__running: {
+              __phase = __ctx::__phase::__running;
+
+              auto __open = std::exchange(this->__context_->__open_, nullptr);
+              __guard.unlock();
+
+              if (__open != nullptr) {
+                __open->__notify_waiter(__open, __ctx::__phase::__running);
+              }
+            }
+            break;
+          case __ctx::__phase::__closing:
             // fallthrough
+          case __ctx::__phase::__closed: {
+              // run will not change this state here.
+            }
+            __guard.unlock();
+            break;
           default: {
               __guard.unlock();
               constexpr bool phase_must_be_constructed_or_opening_or_running = false;
@@ -1046,6 +1140,7 @@ namespace exec {
           return __self.__start_();
         }
         _Receiver __rcvr_;
+        mutable __impl __impl_;
       };
 
     template <class _Receiver>
@@ -1059,7 +1154,7 @@ namespace exec {
           [[nodiscard]] friend __run_op_t<_Receiver>
           tag_invoke(connect_t, _Self&& __self, _Receiver __rcvr) {
             return __run_op_t<_Receiver>{
-              __self.__scope_,
+              __self.__context_,
               (_Receiver&&) __rcvr};
           }
 
@@ -1071,44 +1166,28 @@ namespace exec {
           return {};
         }
 
-        const __impl* __scope_;
+        mutable __ctx* __context_;
       };
 
     ////////////////////////////////////////////////////////////////////////////
-    // async_scope_context
-    struct async_scope_context : __immovable {
-      async_scope_context() = default;
+    // counting_scope
+    struct counting_scope : __immovable {
+      counting_scope() = default;
 
       using token_t = __async_scope;
 
-      [[deprecated]] in_place_stop_source& get_stop_source() noexcept {
-        return __impl_.__stop_source_;
-      }
-
-      [[deprecated]] in_place_stop_token get_stop_token() const noexcept {
-        return __impl_.__stop_source_.get_token();
-      }
-
-      [[deprecated]] bool request_stop() noexcept {
-        return __impl_.__stop_source_.request_stop();
-      }
     private:
       friend __open_sender
-      tag_invoke(async_resource_t::open_t, async_scope_context& __self) {
-        return __open_sender{&__self.__impl_};
+      tag_invoke(async_resource_t::open_t, const counting_scope& __self) {
+        return __open_sender{&__self.__ctx_};
       }
 
       friend __run_sender
-      tag_invoke(async_resource_t::run_t, async_scope_context& __self) {
-        return __run_sender{&__self.__impl_};
+      tag_invoke(async_resource_t::run_t, counting_scope& __self) {
+        return __run_sender{&__self.__ctx_};
       }
 
-      friend __close_sender
-      tag_invoke(async_resource_t::close_t, async_scope_context& __self) {
-        return __close_sender{&__self.__impl_};
-      }
-    private:
-      mutable __impl __impl_;
+      mutable __ctx __ctx_{};
     };
 
   } // namespace __scope
@@ -1116,5 +1195,5 @@ namespace exec {
   using __scope::async_scope_t;
   inline constexpr async_scope_t async_scope{};
 
-  using __scope::async_scope_context;
+  using __scope::counting_scope;
 } // namespace exec
