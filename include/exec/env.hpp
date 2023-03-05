@@ -113,6 +113,103 @@ namespace exec {
 
   inline constexpr __read_with_default::__read_with_default_t read_with_default{};
 
+  namespace __replace {
+    using namespace stdexec;
+
+    struct __replace_t;
+
+    template <class _ReceiverId, class _Env>
+    struct __operation_base {
+      using _Receiver = __t<_ReceiverId>;
+      _Receiver __rcvr_;
+      _Env __env_;
+    };
+
+    template <class _ReceiverId, class _Env>
+    struct __receiver : receiver_adaptor<__receiver<_ReceiverId, _Env>> {
+      using _Receiver = stdexec::__t<_ReceiverId>;
+
+      _Receiver&& base() && noexcept {
+        return (_Receiver&&) __op_->__rcvr_;
+      }
+
+      const _Receiver& base() const & noexcept {
+        return __op_->__rcvr_;
+      }
+
+      auto get_env() const -> _Env {
+        return __op_->__env_;
+      }
+
+      __operation_base<_ReceiverId, _Env>* __op_;
+    };
+
+    template <class _SenderId, class _ReceiverId, class _Env>
+    struct __operation : __operation_base<_ReceiverId, _Env> {
+      using _Sender = __t<_SenderId>;
+      using __base_t = __operation_base<_ReceiverId, _Env>;
+      using __receiver_t = __receiver<_ReceiverId, _Env>;
+      connect_result_t<_Sender, __receiver_t> __state_;
+
+      __operation(_Sender&& __sndr, auto&& __rcvr, auto&& __env)
+        : __base_t{(decltype(__rcvr)) __rcvr, (decltype(__env)) __env}
+        , __state_{connect((_Sender&&) __sndr, __receiver_t{{}, this})} {
+      }
+
+      friend void tag_invoke(start_t, __operation& __self) noexcept {
+        start(__self.__state_);
+      }
+    };
+
+    template <class _SenderId, class _Env>
+    struct __sender {
+      using _Sender = __t<_SenderId>;
+      using is_sender = void;
+
+      template <class _ReceiverId>
+      using __receiver_t = __receiver<_ReceiverId, _Env>;
+      template <class _Self, class _Receiver>
+      using __operation_t =
+        __operation<__x<__copy_cvref_t<_Self, _Sender>>, __x<remove_cvref_t<_Receiver>>, _Env>;
+
+      _Sender __sndr_;
+      _Env __env_;
+
+      template <__decays_to<__sender> _Self, receiver _Receiver>
+        requires sender_to<__copy_cvref_t<_Self, _Sender>, __receiver_t<__x<_Receiver>>>
+      friend auto tag_invoke(connect_t, _Self&& __self, _Receiver __rcvr)
+        -> __operation_t<_Self, _Receiver> {
+        return {((_Self&&) __self).__sndr_, (_Receiver&&) __rcvr, ((_Self&&) __self).__env_};
+      }
+
+      friend auto tag_invoke(stdexec::get_env_t, const __sender& __self) //
+        noexcept(stdexec::__nothrow_callable<stdexec::get_env_t, const _Sender&>)
+          -> stdexec::__call_result_t<stdexec::get_env_t, const _Sender&> {
+        return stdexec::get_env(__self.__sndr_);
+      }
+
+      template <__decays_to<__sender> _Self, class _Env2>
+      friend auto tag_invoke(get_completion_signatures_t, _Self&&, _Env2)
+        -> completion_signatures_of_t< __copy_cvref_t<_Self, _Sender>, _Env>;
+    };
+
+    struct __replace_t {
+      template <__movable_value _Env = empty_env, sender<_Env> _Sender>
+      auto operator()(_Sender&& __sndr, _Env&& __env = _Env{}) const
+        -> __sender<__x<decay_t<_Sender>>, decay_t<_Env>> {
+        return {(_Sender&&) __sndr, (_Env&&) __env};
+      }
+
+      template <__movable_value _Env = empty_env>
+      auto operator()(_Env __env = _Env{}) const
+        -> __binder_back<__replace_t, decay_t<_Env>> {
+        return {{}, {}, (_Env&&) __env};
+      }
+    };
+  } // namespace __replace
+
+  inline constexpr __replace::__replace_t replace{};
+
   namespace __write {
     using namespace stdexec;
 
