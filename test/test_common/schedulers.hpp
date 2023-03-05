@@ -104,6 +104,12 @@ struct impulse_scheduler {
   }
 
   ~impulse_scheduler() = default;
+  
+  //! Return the number of queued items.
+  size_t size() const {
+    std::unique_lock lock{shared_data_->mutex_};
+    return shared_data_->all_commands_.size();
+  }
 
   //! Actually start the command from the last started operation_state
   //! Blocks if no command registered (i.e., no operation state started)
