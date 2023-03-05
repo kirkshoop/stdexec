@@ -90,9 +90,7 @@ int main() {
   ex::scheduler auto io_sched = io_pool.get_scheduler();
 
   std::array<std::byte, 16 * 1024> buffer;
-  // static_assert(exec::unique_location<typename exec::counting_scope::token_t>);
-  // static_assert(exec::satisfies<typename exec::counting_scope::token_t, exec::async_resource.token>);
-  static_assert(exec::satisfies<typename exec::counting_scope::token_t, exec::async_scope>);
+  static_assert(exec::satisfies<typename exec::counting_scope::token_t<ex::empty_env>, exec::async_scope>);
   exec::counting_scope context;
   auto use = exec::async_resource.open(context) | 
     stdexec::let_value([&](auto scope){

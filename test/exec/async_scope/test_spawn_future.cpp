@@ -1,6 +1,7 @@
 #include <catch2/catch.hpp>
 #include <exec/async_scope.hpp>
 #include <exec/env.hpp>
+#include <exec/inline_scheduler.hpp>
 #include "test_common/schedulers.hpp"
 #include "test_common/receivers.hpp"
 #include "test_common/type_helpers.hpp"
@@ -256,8 +257,8 @@ TEST_CASE(
   "spawn_future will propagate exceptions encountered during op creation",
   "[counting_scope][spawn_future]") {
   counting_scope context;
-  std::optional<typename counting_scope::token_t> scp;
-  auto use = exec::async_resource.open(context) | 
+  std::optional<typename counting_scope::token_t<ex::empty_env>> scp;
+  auto use = exec::replace(exec::async_resource.open(context)) | 
     ex::then([&](exec::satisfies<exec::async_scope> auto scope){
       scp.emplace(scope);
       try {
@@ -356,36 +357,42 @@ TEST_CASE(
 }
 
 TEST_CASE(
-  "TODO: spawn_future work can be cancelled by cancelling the scope",
+  "spawn_future work can be cancelled by cancelling the scope",
   "[counting_scope][spawn_future]") {
   impulse_scheduler sch;
+  ex::in_place_stop_source source;
+  auto env = exec::make_env(
+    ex::empty_env{}, 
+    exec::with(ex::get_stop_token, source.get_token()), 
+    exec::with(ex::get_scheduler, exec::inline_scheduler{}));
   bool cancelled1{false};
   bool cancelled2{false};
   counting_scope context;
   auto use = exec::async_resource.open(context) | 
-    ex::then([&](exec::satisfies<exec::async_scope> auto scope){
+    ex::then([](exec::satisfies<exec::async_scope> auto scope){
       return std::move(scope);
     });
   auto op = ex::connect(exec::async_resource.run(context), expect_void_receiver{});
   ex::start(op);
 
-  auto [scope] = ex::sync_wait(std::move(use)).value();
-
+  auto [scope] = ex::sync_wait(
+    exec::replace(std::move(use), env)).value();
+  static_assert(ex::__decays_to<decltype(scope), exec::counting_scope::token_t<decltype(env)>>);
   {
     ex::sender auto snd1 = exec::async_scope.spawn_future(
       scope, 
-      ex::on(sch, ex::just() 
+      ex::on(sch, ex::just())
         | ex::let_stopped([&] {
             cancelled1 = true;
             return ex::just();
-          })));
+          }));
     ex::sender auto snd2 = exec::async_scope.spawn_future(
       scope, 
-      ex::on(sch, ex::just() 
+      ex::on(sch, ex::just())
         | ex::let_stopped([&] {
             cancelled2 = true;
             return ex::just();
-          })));
+          }));
     (void)snd1;
     (void)snd2;
   }
@@ -394,23 +401,28 @@ TEST_CASE(
   // REQUIRE(P2519::__scope::op_count(scope) == 2);
 
   // Execute the first operation, before cancelling
+  REQUIRE(2 == sch.size());
   sch.start_next();
   REQUIRE_FALSE(cancelled1);
   REQUIRE_FALSE(cancelled2);
+  REQUIRE(1 == sch.size());
+  REQUIRE_FALSE(ex::get_stop_token(env).stop_requested());
+  REQUIRE(ex::get_stop_token(env).stop_possible());
 
   // Cancel the counting_scope object
 
-  // context.request_stop();
+  source.request_stop();
+  REQUIRE(1 == sch.size());
+  REQUIRE(ex::get_stop_token(env).stop_requested());
 
   // TODO: reenable this
   // REQUIRE(P2519::__scope::op_count(scope) == 1);
 
-  // Execute the first operation, after cancelling
+  // Execute the second operation, after cancelling
   sch.start_next();
   REQUIRE_FALSE(cancelled1);
-  // TODO: second operation should be cancelled
-  // REQUIRE(cancelled2);
-  REQUIRE_FALSE(cancelled2);
+  REQUIRE(cancelled2);
+  REQUIRE(0 == sch.size());
 
   // TODO: reenable this
   // REQUIRE(P2519::__scope::empty(scope));
@@ -423,7 +435,7 @@ concept is_spawn_future_worthy =
     requires(
       S&& snd, 
       exec::counting_scope& context, 
-      exec::counting_scope::token_t scope) { 
+      exec::counting_scope::token_t<ex::empty_env> scope) { 
         exec::async_scope.spawn_future(scope, std::move(snd)); 
       };
 

@@ -19,6 +19,7 @@
 #include <stdexec/execution.hpp>
 #include <test_common/schedulers.hpp>
 #include <exec/on.hpp>
+#include <exec/env.hpp>
 #include <exec/async_scope.hpp>
 
 namespace ex = stdexec;
@@ -56,7 +57,7 @@ TEST_CASE("Can pass exec::on sender to counting_scope::spawn_future", "[adaptors
   auto use = exec::async_resource.open(context) | 
     ex::let_value([&](exec::satisfies<exec::async_scope> auto scope){
       impulse_scheduler sched;
-      auto fut = exec::async_scope.spawn_future(scope, exec::on(sched, ex::just(42)), env);
+      auto fut = exec::async_scope.spawn_future(scope, exec::replace(exec::on(sched, ex::just(42)), env));
       sched.start_next();
       auto [i] = stdexec::sync_wait(std::move(fut)).value();
       CHECK(i == 42);

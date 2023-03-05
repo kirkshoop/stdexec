@@ -18,6 +18,7 @@
 #include <stdexec/execution.hpp>
 #include <exec/async_scope.hpp>
 #include <exec/create.hpp>
+#include <exec/env.hpp>
 #include <exec/static_thread_pool.hpp>
 
 #include <test_common/receivers.hpp>
@@ -34,12 +35,12 @@ namespace {
     ex::connect_result_t<
       ex::__call_result_t<exec::async_resource_t::run_t, exec::counting_scope&>,
       expect_void_receiver<>> op_;
-    std::optional<exec::counting_scope::token_t> scope_;
+    std::optional<exec::counting_scope::token_t<ex::empty_env>> scope_;
 
     create_test_fixture() 
       : op_{ex::connect(exec::async_resource.run(context_), expect_void_receiver{})} {
       ex::start(op_);
-      auto [scope] = stdexec::sync_wait(exec::async_resource.open(context_)).value();
+      auto [scope] = stdexec::sync_wait(exec::replace(exec::async_resource.open(context_))).value();
       scope_ = scope;
     }
     ~create_test_fixture() {
