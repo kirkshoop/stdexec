@@ -84,18 +84,9 @@ namespace exec {
       template<class _T>
         requires 
           requires (const _T& __t_clv){
-            get_env_t{}(__t_clv);
             close_t{}(__t_clv);
           } 
         inline constexpr bool satisfies() const {return true;}
-
-      using get_env_t = stdexec::get_env_t;
-      /// @brief get_env() provides an environment that contains the resource
-      /// @details returns the environment that the receiver connected to 
-      /// the sender returned from run() provided. 
-      /// @param resource-token&
-      /// @returns environment
-      inline static constexpr get_env_t get_env{};
 
       using close_t = __resource::close_t;
       /// @brief close() provides a sender-of-void. 
