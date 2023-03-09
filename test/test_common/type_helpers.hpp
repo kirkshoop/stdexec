@@ -24,7 +24,7 @@ namespace ex = stdexec;
 struct immovable {
   immovable() = default;
 
-  private:
+ private:
   STDEXEC_IMMOVABLE(immovable);
 };
 
@@ -40,8 +40,17 @@ struct movable {
   int value() {
     return value_;
   } // silence warning of unused private field
-  private:
+ private:
   int value_;
+};
+
+//! A type with potentially throwing move/copy constructors
+struct potentially_throwing {
+  potentially_throwing() = default;
+  potentially_throwing(potentially_throwing&&) noexcept(false) {}
+  potentially_throwing(const potentially_throwing &) noexcept(false) {}
+  potentially_throwing& operator=(potentially_throwing&&) noexcept(false) { return *this; }
+  potentially_throwing& operator=(const potentially_throwing &) noexcept(false) { return *this; }
 };
 
 //! Used for debugging, to generate errors to the console

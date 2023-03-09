@@ -39,7 +39,7 @@ struct scheduler_env {
 //! thread-safety to allow it to be run with `sync_wait` (which makes us not control when the
 //! operation_state object is created and started).
 struct impulse_scheduler {
-  private:
+ private:
   //! Command type that can store the action of firing up a sender
   using oper_command_t = std::function<void()>;
   using cmd_vec_t = std::vector<oper_command_t>;
@@ -82,6 +82,9 @@ struct impulse_scheduler {
   };
 
   struct my_sender {
+    using __id = my_sender;
+    using __t = my_sender;
+
     using is_sender = void;
     using completion_signatures = ex::completion_signatures< //
       ex::set_value_t(),                                     //
@@ -98,7 +101,10 @@ struct impulse_scheduler {
     }
   };
 
-  public:
+ public:
+  using __id = impulse_scheduler;
+  using __t = impulse_scheduler;
+
   impulse_scheduler()
     : shared_data_(std::make_shared<data>()) {
   }
@@ -144,6 +150,9 @@ struct impulse_scheduler {
 
 //! Scheduler that executes everything inline, i.e., on the same thread
 struct inline_scheduler {
+  using __id = inline_scheduler;
+  using __t = inline_scheduler;
+
   template <typename R>
   struct oper : immovable {
     R recv_;
@@ -154,6 +163,9 @@ struct inline_scheduler {
   };
 
   struct my_sender {
+    using __id = my_sender;
+    using __t = my_sender;
+
     using is_sender = void;
     using completion_signatures = ex::completion_signatures<ex::set_value_t()>;
 
@@ -183,6 +195,9 @@ struct inline_scheduler {
 //! Scheduler that returns a sender that always completes with error.
 template <typename E = std::exception_ptr>
 struct error_scheduler {
+  using __id = error_scheduler;
+  using __t = error_scheduler;
+
   template <typename R>
   struct oper : immovable {
     R recv_;
@@ -194,6 +209,9 @@ struct error_scheduler {
   };
 
   struct my_sender {
+    using __id = my_sender;
+    using __t = my_sender;
+
     using is_sender = void;
     using completion_signatures = ex::completion_signatures< //
       ex::set_value_t(),                                     //
@@ -229,6 +247,9 @@ struct error_scheduler {
 
 //! Scheduler that returns a sender that always completes with cancellation.
 struct stopped_scheduler {
+  using __id = stopped_scheduler;
+  using __t = stopped_scheduler;
+
   template <typename R>
   struct oper : immovable {
     R recv_;
@@ -239,6 +260,9 @@ struct stopped_scheduler {
   };
 
   struct my_sender {
+    using __id = my_sender;
+    using __t = my_sender;
+
     using is_sender = void;
     using completion_signatures = ex::completion_signatures< //
       ex::set_value_t(),                                     //

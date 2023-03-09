@@ -548,7 +548,7 @@ namespace exec {
       std::unique_ptr<__future_state<_Sender, _Env>> __state_;
       [[no_unique_address]] __forward_consumer __forward_consumer_;
 
-  public:
+     public:
       ~__future_op() noexcept {
         if (__state_ != nullptr) {
           auto __raw_state = __state_.get();
