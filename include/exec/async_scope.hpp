@@ -42,7 +42,7 @@ namespace exec {
       template <class _Fn, class _Env, class _NestedSender>
         using __f = __minvoke<_Fn, _Env, _NestedSender>;
 
-      template <class _AsyncScopeToken, __movable_value _Env = empty_env, sender<_Env> _NestedSender>
+      template <class _AsyncScopeToken, __movable_value _Env = empty_env, sender_in<_Env> _NestedSender>
         requires tag_invocable<spawn_t, const _AsyncScopeToken&, _NestedSender, _Env>
       void operator()(const _AsyncScopeToken& __tkn, _NestedSender&& __ns, _Env __env = {}) const {
         (void) tag_invoke(spawn_t{}, __tkn, (_NestedSender&&) __ns, (_Env&&) __env);
@@ -53,7 +53,7 @@ namespace exec {
       template <class _Fn, class _Env, class _NestedSender>
         using __f = __minvoke<_Fn, _Env, _NestedSender>;
 
-      template <class _AsyncScopeToken, __movable_value _Env = empty_env, sender<_Env> _NestedSender>
+      template <class _AsyncScopeToken, __movable_value _Env = empty_env, sender_in<_Env> _NestedSender>
         requires tag_invocable<spawn_future_t, const _AsyncScopeToken&, _NestedSender, _Env>
       auto operator()(const _AsyncScopeToken& __tkn, _NestedSender&& __ns, _Env __env = {}) const {
         return tag_invoke(spawn_future_t{}, __tkn, (_NestedSender&&) __ns, (_Env&&) __env);
@@ -901,7 +901,7 @@ namespace exec {
           return nest_result_t<_Constrained>{__self.__context_, (_Constrained&&) __c};
         }
 
-      template <__decays_to<__async_scope> _Self, __movable_value _Env2, sender<_Env> _Sender>
+      template <__decays_to<__async_scope> _Self, __movable_value _Env2, sender_in<_Env> _Sender>
           requires sender_to<nest_result_t<_Sender>, __spawn_receiver_t<_Env>>
         friend void tag_invoke(spawn_t, _Self&& __self, _Sender&& __sndr, _Env2&&) {
           using __op_t = __spawn_operation_t<nest_result_t<_Sender>, _Env>;
@@ -910,7 +910,7 @@ namespace exec {
           // that it is eventually deleted
           stdexec::start(*new __op_t{nest_t{}(__self, (_Sender&&) __sndr), __self.__env_, __self.__context_->__impl_});
         }
-      template <__decays_to<__async_scope> _Self, __movable_value _Env2, sender<_Env> _Sender>
+      template <__decays_to<__async_scope> _Self, __movable_value _Env2, sender_in<_Env> _Sender>
           requires 
             sender_to<
               nest_result_t<_Sender>, 
@@ -954,7 +954,7 @@ namespace exec {
               // open
               __async_scope<__x<env_of_t<_Receiver>>> __tkn{__that.__context_, get_env(__that.__rcvr_)};
               _Receiver __rcvr{(_Receiver&&)__that.__rcvr_};
-              set_value((_Receiver&&)__rcvr, __tkn);
+              set_value((_Receiver&&)__rcvr, std::move(__tkn));
             }
             break;
           case __ctx::__phase::__closing: 
@@ -999,7 +999,7 @@ namespace exec {
               __async_scope<__x<env_of_t<_Receiver>>> __tkn{this->__context_, get_env(this->__rcvr_)};
               _Receiver __rcvr{(_Receiver&&)this->__rcvr_};
               __guard.unlock();
-              set_value((_Receiver&&)__rcvr, __tkn);
+              set_value((_Receiver&&)__rcvr, std::move(__tkn));
             }
             break;
           case __ctx::__phase::__closing: 
@@ -1026,8 +1026,14 @@ namespace exec {
 
       struct __open_sender {
         using is_sender = void;
+        using __id = __open_sender;
+        using __t = __open_sender;
+        template <class _Env>
+          using __completions =
+            completion_signatures<set_value_t(__async_scope<__x<_Env>>), set_stopped_t()>;
 
         template <__decays_to<__open_sender> _Self, receiver _Receiver>
+            requires receiver_of<_Receiver, __completions<env_of_t<_Receiver>>>
           [[nodiscard]] friend __open_op_t<_Receiver>
           tag_invoke(connect_t, _Self&& __self, _Receiver __rcvr) {
             return __open_op_t<_Receiver>{
@@ -1040,7 +1046,7 @@ namespace exec {
           -> dependent_completion_signatures<_Env>;
         template <__decays_to<__open_sender> _Self, __none_of<no_env> _Env>
         friend auto tag_invoke(get_completion_signatures_t, _Self&&, _Env)
-          -> completion_signatures<set_value_t(__async_scope<__x<_Env>>), set_stopped_t()>;
+          -> __completions<_Env>;
 
         friend empty_env tag_invoke(get_env_t, const __open_sender& __self) noexcept {
           return {};
