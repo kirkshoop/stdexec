@@ -194,13 +194,14 @@ namespace exec {
     };
 
     struct __replace_t {
-      template <__movable_value _Env = empty_env, sender<_Env> _Sender>
+      template <__movable_value _Env = empty_env, sender_in<_Env> _Sender>
       auto operator()(_Sender&& __sndr, _Env&& __env = _Env{}) const
         -> __sender<__x<decay_t<_Sender>>, decay_t<_Env>> {
         return {(_Sender&&) __sndr, (_Env&&) __env};
       }
 
       template <__movable_value _Env = empty_env>
+        requires (!sender<_Env>)
       auto operator()(_Env __env = _Env{}) const
         -> __binder_back<__replace_t, decay_t<_Env>> {
         return {{}, {}, (_Env&&) __env};
