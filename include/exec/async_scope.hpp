@@ -122,16 +122,41 @@ namespace exec {
       mutable __ctx* __context_ = nullptr;
       void (*__notify_waiter)(__task*, __phase) noexcept = nullptr;
       __task* __next_ = nullptr;
+
+      ~__task() {
+        printf("~__task this(%p)\n", this);
+      }
     };
 
+    struct alock {
+      mutable std::mutex __lock_{};
+      mutable bool __locked_ = false;
+      bool try_lock() const {
+        return __lock_.try_lock();
+      }
+      void lock() const {
+        __lock_.lock();
+        printf("   locked\n");
+        bool __old = std::exchange(__locked_, true);
+        STDEXEC_ASSERT(!__old);
+      }
+      void unlock() const {
+        bool __old = std::exchange(__locked_, false);
+        STDEXEC_ASSERT(__old);
+        __lock_.unlock();
+        printf("un-locked\n");
+      }
+    };
+    using scope_lock_t = alock;
     struct __ctx : __immovable {
       using __phase = __scope::__phase;
-      mutable std::mutex __lock_{};
+      mutable alock __lock_{};
       mutable __phase __phase_ = __phase::__constructed;
       mutable __task* __open_ = nullptr;
       mutable __impl* __impl_ = nullptr;
 
       ~__ctx() {
+        printf("~__ctx this(%p)\n", this);
         std::unique_lock __guard{__lock_};
         // these help with debugging
         STDEXEC_ASSERT(__phase_ != __phase::__opening);
@@ -147,7 +172,8 @@ namespace exec {
     };
 
     struct __impl : __immovable {
-      static void __shutdown(std::unique_lock<std::mutex>& __guard, const __impl* __scope) noexcept {
+      static void __shutdown(std::unique_lock<scope_lock_t>& __guard, const __impl* __scope) noexcept {
+        STDEXEC_ASSERT(__guard.owns_lock());
         STDEXEC_ASSERT(__scope != nullptr);
         STDEXEC_ASSERT(__scope->__context_ != nullptr);
         STDEXEC_ASSERT(__scope->__context_->__impl_ != nullptr);
@@ -168,26 +194,29 @@ namespace exec {
         __scope->__context_ = nullptr;
         __scope = nullptr;
         __guard.unlock();
-        // do not access __context 
+        // do not access __scope 
+        // do not access __context_ 
         if (__close != nullptr) {
           __close->__notify_waiter(__close, __phase);
-          // __context must be considered deleted
         }
         if (__run != nullptr) {
           __run->__notify_waiter(__run, __phase);
         }
+        // __scope must be considered deleted
+        // __context_ must be considered deleted
       }
 
-      static void __complete(const __impl* __scope) noexcept {
+      static void __complete(const __impl* __scope, std::unique_lock<scope_lock_t>& __guard) noexcept {
+        STDEXEC_ASSERT(__guard.owns_lock());
         STDEXEC_ASSERT(__scope != nullptr);
         STDEXEC_ASSERT(__scope->__context_ != nullptr);
         STDEXEC_ASSERT(__scope->__context_->__impl_ != nullptr);
-        std::unique_lock __guard{__scope->__context_->__lock_};
         auto& __phase = __scope->__context_->__phase_;
         auto& __active = __scope->__active_;
         if (--__active == 0 && __phase == __ctx::__phase::__closing) {
           __shutdown(__guard, __scope);
           // do not access __scope 
+          // do not access __context 
         }
       }
 
@@ -197,6 +226,7 @@ namespace exec {
       mutable __task* __close_ = nullptr;
 
       ~__impl() {
+        printf("~__impl this(%p)\n", this);
         STDEXEC_ASSERT(__context_ == 0);
         STDEXEC_ASSERT(__active_ == 0);
         STDEXEC_ASSERT(__run_ == nullptr);
@@ -212,6 +242,7 @@ namespace exec {
 
       explicit __close_op(__ctx* __context, _Receiver __rcvr)
         : __task{{}, __context, __notify_waiter}, __rcvr_((_Receiver&&)__rcvr) {
+        printf("__close_op this(%p), __notify_waiter(%p)\n", this, &__notify_waiter);
       }
 
     private:
@@ -250,6 +281,8 @@ namespace exec {
         STDEXEC_ASSERT(this->__context_ != nullptr);
         STDEXEC_ASSERT(this->__context_->__impl_ != nullptr);
         STDEXEC_ASSERT(this->__context_->__impl_->__context_ != nullptr);
+        printf("__close_op start this(%p), __context_(%p), __phase(%d)\n", 
+            this, this->__context_, this->__context_->__phase_);
         std::unique_lock __guard{this->__context_->__lock_};
         auto& __phase = this->__context_->__phase_;
         switch (__phase) {
@@ -277,7 +310,6 @@ namespace exec {
             STDEXEC_ASSERT(__close == nullptr);
             __close = this;
             if (__active != 0) {
-              __guard.unlock();
               return;
             }
           }
@@ -343,6 +375,7 @@ namespace exec {
 
     template <class _ReceiverId>
     struct __nest_rcvr {
+      using is_receiver = void;
       using _Receiver = __t<_ReceiverId>;
       __nest_op_base<_ReceiverId>* __op_;
 
@@ -351,9 +384,12 @@ namespace exec {
       friend void tag_invoke(_Tag, __nest_rcvr&& __self, _As&&... __as) noexcept {
         auto __context = __self.__op_->__context_;
         _Tag{}(std::move(__self.__op_->__rcvr_), (_As&&) __as...);
+        std::unique_lock __guard{__context->__lock_};
+        __impl::__complete(__context->__impl_, __guard);
         // do not access __op_
         // do not access this
-        __impl::__complete(__context->__impl_);
+        // do not access __context_
+        // do not access __impl_
       }
 
       friend env_of_t<_Receiver>
@@ -372,7 +408,8 @@ namespace exec {
             : __nest_op_base<_ReceiverId>{{}, __context, (_Rcvr&&) __rcvr}
             , __op_(connect((_Sender&&) __c, __nest_rcvr<_ReceiverId>{this})) {}
       private:
-        void __check_start_(std::unique_lock<std::mutex>& __guard) noexcept {
+        void __check_start_(std::unique_lock<scope_lock_t>& __guard) noexcept {
+          STDEXEC_ASSERT(__guard.owns_lock());
           switch (this->__context_->__phase_) {
           case __ctx::__phase::__constructed: 
             // fallthrough
@@ -400,6 +437,7 @@ namespace exec {
               std::terminate();
             }
           };
+          STDEXEC_ASSERT(__guard.owns_lock());
         }
 
         void __start_() noexcept {
@@ -407,10 +445,12 @@ namespace exec {
           STDEXEC_ASSERT(this->__context_->__impl_);
           std::unique_lock __guard{this->__context_->__lock_};
           __check_start_(__guard);
+          STDEXEC_ASSERT(__guard.owns_lock());
           auto& __active = this->__context_->__impl_->__active_;
           ++__active;
           __guard.unlock();
           start(__op_);
+          __guard.lock();
         }
         friend void tag_invoke(start_t, __nest_op& __self) noexcept {
           return __self.__start_();
@@ -473,10 +513,10 @@ namespace exec {
     };
 
     struct __subscription : __immovable {
-      void (*__complete_)(__subscription*) noexcept = nullptr;
+      void (*__complete_)(__subscription*, std::unique_lock<scope_lock_t>& __guard) noexcept = nullptr;
 
-      void __complete() noexcept {
-        __complete_(this);
+      void __complete(std::unique_lock<scope_lock_t>& __guard) noexcept {
+        __complete_(this, __guard);
       }
 
       __subscription* __next_ = nullptr;
@@ -495,13 +535,14 @@ namespace exec {
         __self.__start_();
       }
 
-      void __complete_() noexcept try {
-        auto __state = std::move(__state_);
+      void __complete_(std::unique_lock<scope_lock_t>& __guard) noexcept try {
+        STDEXEC_ASSERT(__guard.owns_lock());
+        auto __state = std::exchange(__state_, nullptr);
         STDEXEC_ASSERT(__state != nullptr);
-        std::unique_lock __guard{__state->__mutex_};
         // either the future is still in use or it has passed ownership to __state->__no_future_
         if (__state->__no_future_.get() != nullptr || __state->__step_ != __future_step::__future) {
           // invalid state - there is a code bug in the state machine
+          __guard.unlock();
           std::terminate();
         } else if (get_stop_token(get_env(__rcvr_)).stop_requested()) {
           __guard.unlock();
@@ -511,6 +552,7 @@ namespace exec {
           std::visit(
             [this, &__guard]<class _Tup>(_Tup& __tup) {
               if constexpr (same_as<_Tup, std::monostate>) {
+                __guard.unlock();
                 std::terminate();
               } else {
                 std::apply(
@@ -525,22 +567,22 @@ namespace exec {
             __state->__data_);
         }
       } catch (...) {
-
+        if (__guard.owns_lock()) {__guard.unlock();}
         set_error((_Receiver&&) __rcvr_, std::current_exception());
+        __guard.lock();
       }
 
       void __start_() noexcept try {
         if (!!__state_) {
           std::unique_lock __guard{__state_->__mutex_};
           if (__state_->__data_.index() != 0) {
-            __guard.unlock();
-            __complete_();
+            __complete_(__guard);
+            //do not access this
           } else {
             __state_->__subscribers_.push_back(this);
           }
         }
       } catch (...) {
-
         set_error((_Receiver&&) __rcvr_, std::current_exception());
       }
 
@@ -568,8 +610,8 @@ namespace exec {
       explicit __future_op(
         _Receiver2&& __rcvr, std::unique_ptr<__future_state<_Sender, _Env>> __state)
         : __subscription{{},
-          [](__subscription* __self) noexcept -> void {
-            static_cast<__future_op*>(__self)->__complete_();
+          [](__subscription* __self, std::unique_lock<scope_lock_t>& __guard) noexcept -> void {
+            static_cast<__future_op*>(__self)->__complete_(__guard);
           }}
         , __rcvr_((_Receiver2&&) __rcvr)
         , __state_(std::move(__state))
@@ -669,7 +711,7 @@ namespace exec {
       }
 
       void __step_from_to_(
-        std::unique_lock<std::mutex>& __guard,
+        std::unique_lock<scope_lock_t>& __guard,
         __future_step __from,
         __future_step __to) {
         STDEXEC_ASSERT(__guard.owns_lock());
@@ -679,7 +721,7 @@ namespace exec {
 
       in_place_stop_source __stop_source_;
       std::optional<in_place_stop_callback<__forward_stopped>> __forward_scope_;
-      std::mutex __mutex_;
+      scope_lock_t __mutex_;
       __future_step __step_ = __future_step::__created;
       std::unique_ptr<__future_state_base, __dynamic_delete<__future_state_base>> __no_future_;
       __completions_as_variant<_Completions> __data_;
@@ -689,14 +731,15 @@ namespace exec {
 
     template <class _CompletionsId, class _EnvId>
     struct __future_rcvr {
+      using is_receiver = void;
       using _Completions = __t<_CompletionsId>;
       using _Env = __t<_EnvId>;
       __future_state_base<_Completions, _Env>* __state_;
       const __impl* __scope_;
 
-      void __dispatch_result_() noexcept {
+      void __dispatch_result_(std::unique_lock<scope_lock_t>& __guard) noexcept {
+        STDEXEC_ASSERT(__guard.owns_lock());
         auto& __state = *__state_;
-        std::unique_lock __guard{__state.__mutex_};
         auto __local = std::move(__state.__subscribers_);
         __state.__forward_scope_ = std::nullopt;
         if (__state.__no_future_.get() != nullptr) {
@@ -705,13 +748,16 @@ namespace exec {
           __state.__step_from_to_(__guard, __future_step::__no_future, __future_step::__deleted);
           __guard.unlock();
           __state.__no_future_.reset();
+          __guard.lock();
           return;
         }
         __guard.unlock();
         while (!__local.empty()) {
           auto* __sub = __local.pop_front();
-          __sub->__complete();
+          __sub->__complete(__guard);
+          //do not access this
         }
+        __guard.lock();
       }
 
       template < __one_of<set_value_t, set_error_t, set_stopped_t> _Tag, __movable_value... _As>
@@ -721,8 +767,7 @@ namespace exec {
           std::unique_lock __guard{__state.__mutex_};
           using _Tuple = __decayed_tuple<_Tag, _As...>;
           __state.__data_.template emplace<_Tuple>(_Tag{}, (_As&&) __as...);
-          __guard.unlock();
-          __self.__dispatch_result_();
+          __self.__dispatch_result_(__guard);
         } catch (...) {
           using _Tuple = std::tuple<set_error_t, std::exception_ptr>;
           __state.__data_.template emplace<_Tuple>(set_error_t{}, std::current_exception());
@@ -822,6 +867,7 @@ namespace exec {
 
     template <class _EnvId>
     struct __spawn_rcvr {
+      using is_receiver = void;
       using _Env = __t<_EnvId>;
       __spawn_op_base<_EnvId>* __op_;
       const __impl* __scope_;
@@ -882,16 +928,27 @@ namespace exec {
       using nest_result_t = __nest_sender_t<_Constrained>;
 
       using _Env = __t<_EnvId>;
+      ~__async_scope() {
+        printf("~__async_scope __ctx this(%p), __phase(%d)\n", this->__context_, this->__context_->__phase_);
+      }
+      __async_scope() = delete;
+      __async_scope(const __async_scope&) = default;
+      __async_scope(__async_scope&&) = default;
+      __async_scope& operator=(const __async_scope&) = default;
+      __async_scope& operator=(__async_scope&&) = default;
     private:
       __ctx* __context_;
       _Env __env_;
 
       template <class _ReceiverId>
         friend struct __open_op;
-      explicit __async_scope(__ctx* __context, _Env __env) : __context_(__context), __env_((_Env&&)__env) {}
+      explicit __async_scope(__ctx* __context, _Env __env) : __context_(__context), __env_((_Env&&)__env) {
+        printf("__async_scope __ctx this(%p), __phase(%d)\n", this->__context_, this->__context_->__phase_);
+      }
 
       friend __close_sender
       tag_invoke(async_resource_token_t::close_t, const __async_scope& __self) {
+        printf("__async_scope close __ctx this(%p), __phase(%d)\n", __self.__context_, __self.__context_->__phase_);
         return __close_sender{__self.__context_};
       }
 
@@ -934,6 +991,14 @@ namespace exec {
         explicit __open_op(__ctx* __context, _Receiver __rcvr)
           : __task{{}, __context, __notify_waiter}
           , __rcvr_((_Receiver&&)__rcvr) {
+          printf("__open_op this(%p), __notify_waiter(%p)\n", this, &__notify_waiter);
+          printf("__open_op this(%p), this->__context_(%p), this->__notify_waiter(%p), this->__next_(%p)\n"
+                 "  this->__context_->__impl_(%p), this->__context_->__impl_->__context_(%p)\n", 
+                 this, this->__context_, this->__notify_waiter, this->__next_, this->__context_->__impl_, this->__context_->__impl_->__context_);
+          printf("__open_op __impl_->__active_(%ld), __impl_->__run_(%p), __impl_->__close_(%p)\n"
+                 "  __context_->__phase_(%d), __context_->__open_(%p)\n", 
+                 this->__context_->__impl_->__active_, this->__context_->__impl_->__run_, this->__context_->__impl_->__close_,
+                 this->__context_->__phase_, this->__context_->__open_);
         }
 
       private:
@@ -973,6 +1038,14 @@ namespace exec {
           STDEXEC_ASSERT(this->__context_ != nullptr);
           STDEXEC_ASSERT(this->__context_->__impl_ != nullptr);
           STDEXEC_ASSERT(this->__context_->__impl_->__context_ != nullptr);
+          printf("__open_op start this(%p), this->__context_(%p), this->__notify_waiter(%p), this->__next_(%p)\n"
+                 "  this->__context_->__impl_(%p), this->__context_->__impl_->__context_(%p)\n", 
+                 this, this->__context_, this->__notify_waiter, this->__next_, this->__context_->__impl_, this->__context_->__impl_->__context_);
+          printf("__open_op start __impl_->__active_(%ld), __impl_->__run_(%p), __impl_->__close_(%p)\n"
+                 "  __context_->__phase_(%d), __context_->__open_(%p)\n", 
+                 this->__context_->__impl_->__active_, this->__context_->__impl_->__run_, this->__context_->__impl_->__close_,
+                 this->__context_->__phase_, this->__context_->__open_);
+          fflush(stdout);
           std::unique_lock __guard{this->__context_->__lock_};
           auto& __phase = this->__context_->__phase_;
           switch (__phase) {
@@ -1000,6 +1073,7 @@ namespace exec {
               _Receiver __rcvr{(_Receiver&&)this->__rcvr_};
               __guard.unlock();
               set_value((_Receiver&&)__rcvr, std::move(__tkn));
+              __guard.lock();
             }
             break;
           case __ctx::__phase::__closing: 
@@ -1013,6 +1087,7 @@ namespace exec {
               std::terminate();
             }
           };
+          STDEXEC_ASSERT(__guard.owns_lock());
         }
         friend void tag_invoke(start_t, __open_op& __self) noexcept {
           return __self.__start_();
@@ -1064,9 +1139,21 @@ namespace exec {
         explicit __run_op(__ctx* __context, _Receiver __rcvr)
           : __task{{}, __context, __notify_waiter}
           , __rcvr_((_Receiver&&)__rcvr) {
+            printf("__run_op this(%p), __notify_waiter(%p)\n", this, &__notify_waiter);
+            printf("__impl this(%p)\n", &this->__impl_);
+            printf("context this(%p), __phase_(%d)\n", this->__context_, this->__context_->__phase_);
             // cross-link __ctx and __impl
             __context->__impl_ = &this->__impl_;
             this->__impl_.__context_ = __context;
+
+          printf("__run_op this(%p), this->__context_(%p), this->__notify_waiter(%p), this->__next_(%p)\n"
+                 "  this->__context_->__impl_(%p), this->__context_->__impl_->__context_(%p)\n", 
+                 this, this->__context_, this->__notify_waiter, this->__next_, this->__context_->__impl_, this->__context_->__impl_->__context_);
+          printf("__run_op __impl_->__active_(%ld), __impl_->__run_(%p), __impl_->__close_(%p)\n"
+                 "  __context_->__phase_(%d), __context_->__open_(%p)\n", 
+                 this->__context_->__impl_->__active_, this->__context_->__impl_->__run_, this->__context_->__impl_->__close_,
+                 this->__context_->__phase_, this->__context_->__open_);
+          fflush(stdout);
         }
 
       private:
@@ -1105,6 +1192,8 @@ namespace exec {
           STDEXEC_ASSERT(this->__context_ != nullptr);
           STDEXEC_ASSERT(this->__context_->__impl_ != nullptr);
           STDEXEC_ASSERT(this->__context_->__impl_->__context_ != nullptr);
+          printf("__run_op start this(%p), __context_(%p), __phase(%d)\n", 
+            this, this->__context_, this->__context_->__phase_);
           std::unique_lock __guard{this->__context_->__lock_};
           auto& __phase = this->__context_->__phase_;
           STDEXEC_ASSERT(this->__impl_.__run_ == nullptr);
@@ -1112,9 +1201,9 @@ namespace exec {
           switch (__phase) {
           case __ctx::__phase::__constructed: {
               __phase = __ctx::__phase::__pending;
+              // run won the race,
               // open() will enter the __opening phase
             }
-            __guard.unlock();
             break;
           case __ctx::__phase::__pending: {
               __guard.unlock();
@@ -1129,10 +1218,11 @@ namespace exec {
               __phase = __ctx::__phase::__running;
 
               auto __open = std::exchange(this->__context_->__open_, nullptr);
-              __guard.unlock();
 
               if (__open != nullptr) {
+                __guard.unlock();
                 __open->__notify_waiter(__open, __ctx::__phase::__running);
+                __guard.lock();
               }
             }
             break;
@@ -1141,7 +1231,6 @@ namespace exec {
           case __ctx::__phase::__closed: {
               // run will not change this state here.
             }
-            __guard.unlock();
             break;
           default: {
               __guard.unlock();
@@ -1156,7 +1245,7 @@ namespace exec {
           return __self.__start_();
         }
         _Receiver __rcvr_;
-        mutable __impl __impl_;
+        mutable __impl __impl_{};
       };
 
     template <class _Receiver>
@@ -1188,7 +1277,14 @@ namespace exec {
     ////////////////////////////////////////////////////////////////////////////
     // counting_scope
     struct counting_scope : __immovable {
-      counting_scope() = default;
+      ~counting_scope() {
+        printf("~counting_scope (%p)\n", this);
+      }
+      counting_scope() {
+        printf("counting_scope (%p)\n", this);
+        printf("__ctx this(%p), __phase(%d)\n", &this->__ctx_, this->__ctx_.__phase_);
+        // std::unique_lock __guard{this->__ctx_.__lock_};
+      }
 
       template<class _Env>
       using token_t = __async_scope<__x<remove_cvref_t<_Env>>>;
@@ -1196,15 +1292,155 @@ namespace exec {
     private:
       friend __open_sender
       tag_invoke(async_resource_t::open_t, const counting_scope& __self) {
+        printf("counting_scope open this(%p)\n", &__self);
+        printf("__ctx this(%p), __phase(%d)\n", &__self.__ctx_, __self.__ctx_.__phase_);
         return __open_sender{&__self.__ctx_};
       }
 
       friend __run_sender
       tag_invoke(async_resource_t::run_t, counting_scope& __self) {
+        printf("counting_scope run this(%p)\n", &__self);
+        printf("__ctx this(%p), __phase(%d)\n", &__self.__ctx_, __self.__ctx_.__phase_);
         return __run_sender{&__self.__ctx_};
       }
 
       mutable __ctx __ctx_{};
+    };
+
+    template <class _T>
+    struct __value {
+      ~__value() {
+        printf("~__value (%p)\n", &value());
+        value().~_T();
+      }
+      __value() requires constructible_from<_T> {
+        printf("__value default placement new(%p) _T\n", &value());
+        ::new (&value()) _T();
+      }
+      template <class _C0, class... _Cn>
+        requires constructible_from<_T, _C0, _Cn...> && (!__decays_to<_Cn, __value> && ...) && (!__decays_to<_Cn, _T> && ...)
+      explicit __value(_C0&& __c0, _Cn&&... __cn) {
+        printf("__value placement new(%p) _T\n", &value());
+        ::new (&value()) _T((_C0&&) __c0, (_Cn&&) __cn...);
+      }
+
+      // moved failure to runtime so that __deferred::__value_ variant can 
+      // move around before _T is constructed, but not after
+      __value(const __value&) {std::terminate();}
+      __value(__value&&) {std::terminate();}
+      __value& operator=(const __value&) {std::terminate(); return *this;}
+      __value& operator=(__value&&) {std::terminate(); return *this;}
+
+      using __storage_t = std::aligned_storage<sizeof(_T), alignof(_T)>;
+      __storage_t __storage_;
+      _T& value() {
+        return *std::launder(reinterpret_cast<_T*>(&__storage_));
+      }
+      const _T& value() const {
+        return *std::launder(reinterpret_cast<const _T*>(&__storage_));
+      }
+    };
+
+    template <class _T, class... _An>
+    struct __deferred {
+      std::optional<std::tuple<_An...>> __args_;
+      std::optional<__value<_T>> __value_;
+      ~__deferred() {
+        printf("~__deferred this(%p)\n", this);
+      }
+      template <class... _Cn>
+        requires constructible_from<std::tuple<_An...>, _Cn...> && constructible_from<_T, _An&&...> && 
+          (!__decays_to<_Cn, __deferred> && ...) && (!__decays_to<_Cn, _T> && ...)
+      explicit __deferred(_Cn&&... __cn) : __args_(std::tuple<_An...>{(_Cn&&) __cn...}), __value_(std::nullopt) {
+        printf("__deferred this(%p)\n", this);
+        STDEXEC_ASSERT(!__value_.has_value());
+      }
+      __deferred(const __deferred& o) : __args_(o.__args_) { STDEXEC_ASSERT(!__value_.has_value()); }
+      __deferred(__deferred&& o) : __args_(std::move(o.__args_)) { STDEXEC_ASSERT(!__value_.has_value()); }
+      __deferred& operator=(const __deferred& o)  = delete;
+      __deferred& operator=(__deferred&& o) = delete;
+      void operator()() {
+        STDEXEC_ASSERT(__args_.has_value());
+        STDEXEC_ASSERT(!__value_.has_value());
+        printf("__deferred construct _T, this(%p)\n", this);
+        std::apply(
+          [this](_An&&... __an){
+            __value_.emplace((_An&&) __an...);
+          }, 
+          std::move(__args_.value()));
+        __args_.reset();
+        printf("__deferred value %d, (%p), this(%p)\n", __value_.has_value(), &__value_.value(), this);
+        fflush(stdout);
+        STDEXEC_ASSERT(!__args_.has_value());
+        STDEXEC_ASSERT(__value_.has_value());
+      }
+      _T& value() {
+        printf("__deferred::value() value %d, (%p), this(%p)\n", __value_.has_value(), __value_.has_value() ? &__value_.value() : nullptr, this);
+        fflush(stdout);
+        STDEXEC_ASSERT(!__args_.has_value());
+        STDEXEC_ASSERT(__value_.has_value());
+        return __value_.value().value();
+      }
+      const _T& value() const {
+        printf("__deferred::value() value %d, (%p), this(%p)\n", __value_.has_value(), __value_.has_value() ? &__value_.value() : nullptr, this);
+        fflush(stdout);
+        STDEXEC_ASSERT(!__args_.has_value());
+        STDEXEC_ASSERT(__value_.has_value());
+        return __value_.value().value();
+      }
+      _T& operator*() {return value();}
+      const _T& operator*() const {return value();}
+      _T* operator->() {return &value();}
+      const _T* operator->() const {return &value();}
+    };
+    template <class _T>
+    struct make_deferred_t {
+      template <class... _An>
+      using deferred_t = __deferred<_T, remove_cvref_t<_An>...>;
+      template <class... _An>
+      deferred_t<_An...> operator()(_An&&... __an) const {
+        return deferred_t<_An...>{(_An&&) __an...};
+      }
+    };
+
+    struct use_resources_t {
+      template <class _UseFn, class... _Rn>
+        requires (__callable<_Rn> && ...)
+      auto operator()(_UseFn __usefn, _Rn... __rn) const {
+        return 
+          // store the values in a stable location
+          let_value(
+            just((_UseFn&&) __usefn, (_Rn&&) __rn...), 
+            [](auto& __usefn, auto&... __rn){
+              printf("use_resources_t __usefn at (%p) end at (%p)\n", &__usefn, &__usefn + 1);
+              // construct the deferred resources in 
+              // the stable location
+              (__rn(), ...);
+              (printf("use_resources_t constructed _T at (%p)\n", &__rn.value()), ...);
+
+              auto __open = let_value(just(), [&__rn...]{ 
+                (printf("use_resources_t open _T at (%p)\n", &__rn.value()), ...);
+                return when_all(async_resource_t{}.open(*__rn)...); });
+              auto __use = 
+                let_value(
+                  std::move(__open), 
+                  [&__usefn, &__rn...](auto... __tkn){
+                    (printf("use_resources_t use _T at (%p)\n", &__rn.value()), ...);
+                    auto __close = let_value(just(__tkn...), [&__rn...](auto... __tkn){
+                      (printf("use_resources_t close _T at (%p)\n", &__rn.value()), ...);
+                      return when_all(async_resource_token_t{}.close(__tkn)...); });
+                    auto __final = [__close = std::move(__close)](auto&&...){ return __close; };
+                    auto __use = __usefn(__tkn...);
+                    auto __use_and_close = let_value(let_error(let_stopped(std::move(__use), __final), __final), __final);
+                    return __use_and_close;
+                  });
+              auto __run = let_value(just(), [&__rn..., __use = std::move(__use)]{ 
+                (printf("use_resources_t run _T at (%p)\n", &__rn.value()), ...);
+                return when_all(async_resource_t{}.run(*__rn)..., __use);});
+
+              return __run;
+            });
+      }
     };
 
   } // namespace __scope
@@ -1213,4 +1449,11 @@ namespace exec {
   inline constexpr async_scope_t async_scope{};
 
   using __scope::counting_scope;
+
+  using __scope::make_deferred_t;
+  template <class _T>
+  inline constexpr make_deferred_t<_T> make_deferred{};
+
+  using __scope::use_resources_t;
+  inline constexpr use_resources_t use_resources{};
 } // namespace exec

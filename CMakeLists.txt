@@ -147,6 +147,13 @@ set(CMAKE_SKIP_INSTALL_ALL_DEPENDENCY ON)
 # Support target for examples and tests
 add_library(stdexec_executable_flags INTERFACE)
 
+target_compile_options(stdexec_executable_flags INTERFACE
+                       $<$<OR:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:AppleClang>,$<CXX_COMPILER_ID:GNU>>:
+                       -fsanitize=address>)
+target_link_options(stdexec_executable_flags INTERFACE
+                       $<$<OR:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:AppleClang>,$<CXX_COMPILER_ID:GNU>>:
+                       -fsanitize=address>)
+
 # Enable warnings
 target_compile_options(stdexec_executable_flags INTERFACE
                        $<$<OR:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:AppleClang>,$<CXX_COMPILER_ID:GNU>>:
