@@ -52,58 +52,43 @@ int main() {
   sync_wait(
     exec::use_resources(
       [sch = ctx.get_scheduler()](
-        exec::satisfies<exec::async_scope> auto&&){
+        exec::satisfies<exec::async_scope> auto scope0,
+        exec::satisfies<exec::async_scope> auto scope1){
 
-        // sender auto begin = schedule(sch); // 2
+        sender auto begin = schedule(sch); // 2
 
-        // sender auto printVoid = then(begin,
-        //   []()noexcept { printf("void\n"); }); // 3
+        auto print = [&](const char* msg){
+          return then(begin, [msg]()noexcept { printf("%s\n", msg); }); // 3
+        };
 
-        printf(
-          "\n"
-          "spawn void\n"
-          "==========\n");
+        exec::async_scope.spawn(scope0, print("spawn - void - 5")); // 5
 
-        // exec::async_scope.spawn(scope, printVoid); // 5
+        exec::async_scope.spawn(scope1, print("spawn - void - 6")); // 6
 
-        // printf(
-        //   "\n"
-        //   "spawn void and 42\n"
-        //   "=================\n");
+        sender auto fortyTwo = then(begin, []()noexcept {return 42;}); // 7
 
-        // sender auto fortyTwo = then(begin, []()noexcept {return 42;}); // 6
+        sender auto fortyTwoFuture = exec::async_scope.spawn_future(scope0, fortyTwo); // 8
 
-        // exec::async_scope.spawn(scope, printVoid); // 7
+        sender auto printFortyTwo = then(std::move(fortyTwoFuture),
+          [](int fortyTwo)noexcept{ printf("future - %d - 9\n", fortyTwo); }); // 9
 
-        // sender auto fortyTwoFuture = exec::async_scope.spawn_future(scope, fortyTwo); // 8
+        sender auto allDone = then(
+          when_all(print("future - void"), std::move(printFortyTwo)),
+          [](auto&&...)noexcept{printf("\nall done - 10\n");}); // 10
 
-        // sender auto printFortyTwo = then(std::move(fortyTwoFuture),
-        //   [](int fortyTwo)noexcept{ printf("%d\n", fortyTwo); }); // 9
+        {
+          sender auto nest = exec::async_scope.nest(scope0, print("nest - void - discarded"));
+          (void)nest;
+        }
 
-        // sender auto allDone = then(
-        //   when_all(printVoid, std::move(printFortyTwo)),
-        //   [](auto&&...)noexcept{printf("\nall done\n");}); // 10
+        {
+          sender auto nest = exec::async_scope.nest(scope0, print("nest - void - connected"));
+          auto op = connect(std::move(nest), noop_receiver{});
+          (void)op;
+        }
 
-        // sync_wait(std::move(allDone));
-
-        // {
-        //   sender auto nest = exec::async_scope.nest(scope, begin);
-        //   (void)nest;
-        // }
-
-        // {
-        //   sender auto nest = exec::async_scope.nest(scope, begin);
-        //   auto op = connect(std::move(nest), noop_receiver{});
-        //   (void)op;
-        // }
-
-        // {
-        //   sender auto nest = exec::async_scope.nest(scope, begin);
-        //   sync_wait(std::move(nest));
-        // }
-
-        // return exec::async_scope.nest(scope, begin);
-        return just();
+        return when_all(exec::async_scope.nest(scope1, std::move(print("nest - void - started"))), std::move(allDone));
       },
+      exec::make_deferred<exec::counting_scope>(),
       exec::make_deferred<exec::counting_scope>()));
 }
