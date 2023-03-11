@@ -136,6 +136,118 @@ namespace exec {
       inline static constexpr token_t token{};
     };
 
+    ///////////////////////////////////////////////////////
+    // make_deferred
+    template <class _T>
+    struct __value {
+      ~__value() {
+        value().~_T();
+      }
+      __value() requires constructible_from<_T> {
+        ::new (&value()) _T();
+      }
+      template <class _C0, class... _Cn>
+        requires constructible_from<_T, _C0, _Cn...> && (!__decays_to<_Cn, __value> && ...) && (!__decays_to<_Cn, _T> && ...)
+      explicit __value(_C0&& __c0, _Cn&&... __cn) {
+        ::new (&value()) _T((_C0&&) __c0, (_Cn&&) __cn...);
+      }
+
+      // moved failure to runtime so that __deferred::__value_ variant can 
+      // move around before _T is constructed, but not after
+      __value(const __value&) {std::terminate();}
+      __value(__value&&) {std::terminate();}
+      __value& operator=(const __value&) = delete;
+      __value& operator=(__value&&) = delete;
+
+      using __storage_t = std::aligned_storage_t<sizeof(_T), alignof(_T)>;
+      __storage_t __storage_;
+      _T& value() {
+        return *std::launder(reinterpret_cast<_T*>(&__storage_));
+      }
+      const _T& value() const {
+        return *std::launder(reinterpret_cast<const _T*>(&__storage_));
+      }
+    };
+
+    template <class _T, class... _An>
+    struct __deferred {
+      std::variant<std::tuple<_An...>, __value<_T>> __value_;
+      ~__deferred() {
+      }
+      template <class... _Cn>
+        requires constructible_from<std::tuple<_An...>, _Cn...> && constructible_from<_T, _An&&...> && 
+          (!__decays_to<_Cn, __deferred> && ...) && (!__decays_to<_Cn, _T> && ...)
+      explicit __deferred(_Cn&&... __cn) : __value_(std::tuple<_An...>{(_Cn&&) __cn...}) {
+        STDEXEC_ASSERT(__value_.index() == 0);
+      }
+      __deferred(const __deferred& o) : __value_(o.__value_) { STDEXEC_ASSERT(__value_.index() == 0); }
+      __deferred(__deferred&& o) : __value_(std::move(o.__value_)) { STDEXEC_ASSERT(__value_.index() == 0); }
+      __deferred& operator=(const __deferred& o)  = delete;
+      __deferred& operator=(__deferred&& o) = delete;
+      void operator()() {
+        STDEXEC_ASSERT(__value_.index() == 0);
+        std::apply(
+          [this](_An... __an){
+            __value_.template emplace<1>((_An&&) __an...);
+          }, 
+          std::move(std::get<0>(__value_)));
+        fflush(stdout);
+        STDEXEC_ASSERT(__value_.index() == 1);
+      }
+      _T& value() {
+        fflush(stdout);
+        STDEXEC_ASSERT(__value_.index() == 1);
+        return std::get<1>(__value_).value();
+      }
+      const _T& value() const {
+        fflush(stdout);
+        STDEXEC_ASSERT(__value_.index() == 1);
+        return std::get<1>(__value_).value();
+      }
+      _T& operator*() {return value();}
+      const _T& operator*() const {return value();}
+      _T* operator->() {return &value();}
+      const _T* operator->() const {return &value();}
+    };
+    template <class _T>
+    struct make_deferred_t {
+      template <class... _An>
+      using deferred_t = __deferred<_T, remove_cvref_t<_An>...>;
+      template <class... _An>
+      deferred_t<_An...> operator()(_An&&... __an) const {
+        return deferred_t<_An...>{(_An&&) __an...};
+      }
+    };
+
+    ///////////////////////////////////////////////////////
+    // use_resources
+    struct use_resources_t {
+      template <class _UseFn, class... _Rn>
+        requires (__callable<_Rn> && ...)
+      auto operator()(_UseFn __usefn, _Rn... __rn) const {
+        return 
+          // store the values in a stable location
+          let_value(
+            just((_UseFn&&) __usefn, (_Rn&&) __rn...), 
+            [](auto& __usefn, auto&... __rn){
+              // construct the deferred resources in 
+              // the stable location
+              (__rn(), ...);
+
+              return when_all(
+                let_value(
+                  when_all(async_resource_t{}.open(*__rn)...), 
+                  [&__usefn](auto&... __tkn){
+                    auto __final = [&](auto&&...){ return when_all(async_resource_token_t{}.close(__tkn)...); };
+                    return let_value(let_error(let_stopped(
+                      __usefn(__tkn...), 
+                      __final), __final), __final);
+                  }),
+                async_resource_t{}.run(*__rn)...);
+            });
+      }
+    };
+
   } // namespace __resource
 
   using __resource::async_resource_t;
@@ -185,4 +297,12 @@ namespace exec {
   inline constexpr async_resource_t async_resource{};
 
   using __resource::async_resource_token_t;
+
+  using __resource::make_deferred_t;
+  template <class _T>
+  inline constexpr make_deferred_t<_T> make_deferred{};
+
+  using __resource::use_resources_t;
+  inline constexpr use_resources_t use_resources{};
+
 } // namespace exec
