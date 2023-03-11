@@ -1334,23 +1334,16 @@ namespace exec {
               // the stable location
               (__rn(), ...);
 
-              auto __open = let_value(just(), [&__rn...]{ 
-                return when_all(async_resource_t{}.open(*__rn)...); });
-              auto __use = 
+              return when_all(
                 let_value(
-                  std::move(__open), 
-                  [&__usefn](auto... __tkn){
-                    auto __close = let_value(just(__tkn...), [](auto... __tkn){
-                      return when_all(async_resource_token_t{}.close(__tkn)...); });
-                    auto __final = [__close = std::move(__close)](auto&&...){ return __close; };
-                    auto __use = __usefn(__tkn...);
-                    auto __use_and_close = let_value(let_error(let_stopped(std::move(__use), __final), __final), __final);
-                    return __use_and_close;
-                  });
-              auto __run = let_value(just(), [&__rn..., __use = std::move(__use)]{ 
-                return when_all(__use, async_resource_t{}.run(*__rn)...);});
-
-              return __run;
+                  when_all(async_resource_t{}.open(*__rn)...), 
+                  [&__usefn](auto&... __tkn){
+                    auto __final = [&](auto&&...){ return when_all(async_resource_token_t{}.close(__tkn)...); };
+                    return let_value(let_error(let_stopped(
+                      __usefn(__tkn...), 
+                      __final), __final), __final);
+                  }),
+                async_resource_t{}.run(*__rn)...);
             });
       }
     };
