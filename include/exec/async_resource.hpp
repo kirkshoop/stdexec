@@ -62,8 +62,8 @@ namespace exec {
         using __f = __minvoke<_Fn>;
 
       template <class _AsyncResource>
-        requires tag_invocable<run_t, _AsyncResource&>
-      auto operator()(_AsyncResource& __rsrc) const {
+        requires tag_invocable<run_t, const _AsyncResource&>
+      auto operator()(const _AsyncResource& __rsrc) const {
         return tag_invoke(run_t{}, __rsrc);
       }
     };
@@ -72,9 +72,9 @@ namespace exec {
       template <class _Fn>
         using __f = __minvoke<_Fn>;
 
-      template <class _AsyncResource>
-        requires tag_invocable<close_t, _AsyncResource&>
-      auto operator()(_AsyncResource& __rsrc) const {
+      template <class _AsyncToken>
+        requires tag_invocable<close_t, const _AsyncToken&>
+      auto operator()(const _AsyncToken& __rsrc) const {
         return tag_invoke(close_t{}, __rsrc);
       }
     };

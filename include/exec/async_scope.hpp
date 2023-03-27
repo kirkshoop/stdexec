@@ -1233,7 +1233,7 @@ namespace exec {
       }
 
       friend __run_sender
-      tag_invoke(async_resource_t::run_t, counting_scope& __self) {
+      tag_invoke(async_resource_t::run_t, const counting_scope& __self) {
         return __run_sender{&__self.__ctx_};
       }
 
