@@ -19,6 +19,8 @@
 #include <exec/async_scope.hpp>
 
 #include "exec/env.hpp"
+#include "exec/time_scheduler.hpp"
+#include "exec/thread_scheduler.hpp"
 #include "exec/static_thread_pool.hpp"
 
 #include <cstdio>
@@ -47,25 +49,25 @@ class noop_receiver : receiver_adaptor<noop_receiver> {
 };
 
 int main() {
-  exec::static_thread_pool ctx{1};
 
   sync_wait(
     exec::use_resources(
-      [sch = ctx.get_scheduler()](
+      [](
+        /* exec::satisfies<exec::time_scheduler> */auto time,
         exec::satisfies<exec::async_scope> auto scope0,
         exec::satisfies<exec::async_scope> auto scope1){
 
-        sender auto begin = schedule(sch); // 2
+        sender auto begin = exec::time_scheduler.schedule_after(time, std::chrono::milliseconds(50)); // 2
 
         auto print = [&](const char* msg){
-          return then(begin, [msg]()noexcept { printf("%s\n", msg); }); // 3
+          return then(begin, [msg](auto, auto)noexcept { printf("%s\n", msg); }); // 3
         };
 
         exec::async_scope.spawn(scope0, print("spawn - void - 5")); // 5
 
         exec::async_scope.spawn(scope1, print("spawn - void - 6")); // 6
 
-        sender auto fortyTwo = then(begin, []()noexcept {return 42;}); // 7
+        sender auto fortyTwo = then(begin, [](auto, auto)noexcept {return 42;}); // 7
 
         sender auto fortyTwoFuture = exec::async_scope.spawn_future(scope0, fortyTwo); // 8
 
@@ -89,6 +91,7 @@ int main() {
 
         return when_all(exec::async_scope.nest(scope1, std::move(print("nest - void - started"))), std::move(allDone));
       },
+      exec::make_deferred<exec::thread_resource<std::chrono::system_clock>>(),
       exec::make_deferred<exec::counting_scope>(),
       exec::make_deferred<exec::counting_scope>()));
 }
