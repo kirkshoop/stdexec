@@ -75,41 +75,50 @@ namespace exec {
         std::unique_lock<std::mutex> guard(lock);
         // wait for startup
         while(phase != thread_phase::Running && phase != thread_phase::Closing) {
+          // wait for phase change
           wake.wait(guard);
         }
         void* opener = std::exchange(open_impl, nullptr);
         auto open = std::exchange(complete_open, nullptr);
         if (opener && open) {
           guard.unlock();
+          // complete pending open operation
           open(opener, this);
           guard.lock();
         }
-        // wait for closing and no pending items
+        // loop until closed
         while(!pending.empty() || phase == thread_phase::Running) {
           if (!pending.empty()) {
             when<clock> next_at = pending.top()->at;
-            // until empty
-            while (!pending.empty()) {
-              // only advance now() when starting a batch
-              time_point now = clock::now();
+            // only advance now() when starting a batch
+            time_point now = clock::now();
+            // pop items from the queue and complete on this thread
+            while (!pending.empty() && next_at < now) {
               // collect batch of ready items under lock
               std::array<item_op_base<Clock>*, 10> local;
               auto end = local.begin();
               while (next_at < now && !pending.empty() && end != local.end()) {
                 *end++ = pending.top();
                 pending.pop();
-                next_at = pending.top()->at;
+                if (!pending.empty()) {
+                  next_at = pending.top()->at;
+                }
               }
               if (local.begin() != end) {
                 guard.unlock();
+                // complete batch of ready items while unlocked
                 for(auto cursor = local.begin() ; cursor != end ; ++cursor) {
                   (*cursor)->complete(*cursor, now);
                 }
                 guard.lock();
               }
             }
-            wake.wait_until(guard, next_at.at);
+            if (!pending.empty() && now < pending.top()->at) {
+              // wait for next item
+              wake.wait_until(guard, pending.top()->at.at);
+            }
           } else {
+            // wait for new item or for phase change
             wake.wait(guard);
           }
         }

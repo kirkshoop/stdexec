@@ -53,7 +53,7 @@ int main() {
   sync_wait(
     exec::use_resources(
       [](
-        /* exec::satisfies<exec::time_scheduler> */auto time,
+        exec::satisfies<exec::time_scheduler> auto time,
         exec::satisfies<exec::async_scope> auto scope0,
         exec::satisfies<exec::async_scope> auto scope1){
 
