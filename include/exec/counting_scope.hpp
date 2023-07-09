@@ -512,7 +512,7 @@ namespace exec {
 
         template <__decays_to<__t> _Self>
         friend stdexec::__t<__sender>
-          tag_invoke(run_t, _Self&&) noexcept {
+          tag_invoke(use_t, _Self&&) noexcept {
           return stdexec::__t<__sender>{};
         }
       };

@@ -21,36 +21,36 @@
 namespace exec {
   using namespace stdexec; 
 
-  namespace __run {
-    struct run_t {
+  namespace __use {
+    struct use_t {
       template <class _Resource>
-        requires tag_invocable<run_t, _Resource>
+        requires tag_invocable<use_t, _Resource>
       STDEXEC_DETAIL_CUDACC_HOST_DEVICE //
         auto
         operator()(_Resource&& __rsrc) const
-        noexcept(nothrow_tag_invocable<run_t, _Resource>) {
-        static_assert(sender<tag_invoke_result_t<run_t, _Resource>>);
-        return tag_invoke(run_t{}, (_Resource&&) __rsrc);
+        noexcept(nothrow_tag_invocable<use_t, _Resource>) {
+        static_assert(sender<tag_invoke_result_t<use_t, _Resource>>);
+        return tag_invoke(use_t{}, (_Resource&&) __rsrc);
       }
 
-      friend constexpr bool tag_invoke(forwarding_query_t, run_t) {
+      friend constexpr bool tag_invoke(forwarding_query_t, use_t) {
         return false;
       }
     };
   }
 
-  using __run::run_t;
-  inline constexpr run_t run;
+  using __use::use_t;
+  inline constexpr use_t use;
 
   template <class _Resource>
-  concept __has_run = //
+  concept __has_use = //
     requires(_Resource&& __rsrc) {
-      { run((_Resource&&) __rsrc) } -> sequence_sender;
+      { use((_Resource&&) __rsrc) } -> sequence_sender;
     };
 
   template <class _Resource>
   concept resource =                                //
-    __has_run<_Resource> &&                         //
+    __has_use<_Resource> &&                         //
     copy_constructible<__decay_t<_Resource>>;
 
   namespace __async_scope {

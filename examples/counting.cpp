@@ -134,7 +134,7 @@ struct app_t {
     bool done = false;
     std::mutex lock;
     std::condition_variable wake;
-    auto op = exec::subscribe(exec::run(exec::counting_scope()), result{ctx.get_scheduler(), done, lock, wake});
+    auto op = exec::subscribe(exec::use(exec::counting_scope()), result{ctx.get_scheduler(), done, lock, wake});
     printf("start counting\n");
     stdexec::start(op);
     std::unique_lock guard{lock};
