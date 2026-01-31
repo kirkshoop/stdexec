@@ -44,7 +44,7 @@ namespace STDEXEC {
     ////////////////////////////////////////////////////////////////////////////////////////////////
     struct then_t {
       template <sender _Sender, __movable_value _Fun>
-      constexpr auto operator()(_Sender&& __sndr, _Fun __fun) const -> __well_formed_sender auto {
+      constexpr auto operator()(_Sender&& __sndr, _Fun __fun) const {
         return __make_sexpr<then_t>(static_cast<_Fun&&>(__fun), static_cast<_Sender&&>(__sndr));
       }
 

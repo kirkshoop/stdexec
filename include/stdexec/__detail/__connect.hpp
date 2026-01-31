@@ -25,6 +25,8 @@
 #include "__operation_states.hpp"
 #include "__tag_invoke.hpp"
 #include "__type_traits.hpp"
+#include "stdexec/__detail/__diagnostics.hpp"
+#include "stdexec/__detail/__receivers.hpp"
 
 namespace STDEXEC {
   /////////////////////////////////////////////////////////////////////////////
@@ -58,6 +60,15 @@ namespace STDEXEC {
       constexpr void operator()() const noexcept = delete;
     };
 
+    template <class Reason, class _Sender, class _Receiver, class...>
+    struct _INVALID_CONNECT_INVOCATION_ {
+      constexpr void operator()() const noexcept = delete;
+    };
+    struct _NOT_A_SENDER_ {};
+    struct _NOT_A_RECEIVER_ {};
+    struct _NOT_A_SENDER_FOR_ENV_ {};
+    struct _NOT_A_RECEIVER_FROM_SENDER_ {};
+
     /////////////////////////////////////////////////////////////////////////////
     // connect_t
     struct connect_t {
@@ -82,51 +93,62 @@ namespace STDEXEC {
 
       template <class _Sender, class _Receiver>
       static consteval auto __get_declfn() noexcept {
-        static_assert(sender<_Sender>, "The first argument to STDEXEC::connect must be a sender");
-        if constexpr (!receiver<_Receiver>) {
-          static_assert(
-            __nothrow_move_constructible<__decay_t<_Receiver>>,
-            "Receivers must be nothrow move constructible");
-          static_assert(
-            receiver<_Receiver>, "The second argument to STDEXEC::connect must be a receiver");
-        }
+        if constexpr (!sender<_Sender>) {
+          return _INVALID_CONNECT_INVOCATION_<_NOT_A_SENDER_, _WITH_PRETTY_SENDER_<_Sender>, _WITH_RECEIVER_(_Receiver)>{};
+        } else if constexpr (!receiver<_Receiver>) {
+          return _INVALID_CONNECT_INVOCATION_<_NOT_A_RECEIVER_, _WITH_PRETTY_SENDER_<_Sender>, _WITH_RECEIVER_(_Receiver)>{};
+        } else if constexpr (!sender_in<_Sender, env_of_t<_Receiver>>) {
+          return _INVALID_CONNECT_INVOCATION_<_NOT_A_SENDER_FOR_ENV_,
+            _WITH_PRETTY_SENDER_<_Sender>,
+            _WITH_RECEIVER_(_Receiver),
+            _WITH_ENVIRONMENT_(env_of_t<_Receiver>),
+            _WITH_COMPLETION_SIGNATURES_(__completion_signatures_of_t<_Sender, env_of_t<_Receiver>>)>{};
+        } else if constexpr (!__receiver_from<_Receiver, _Sender>) {
+          return _INVALID_CONNECT_INVOCATION_<_NOT_A_RECEIVER_FROM_SENDER_,
+            _WITH_PRETTY_SENDER_<_Sender>,
+            _WITH_RECEIVER_(_Receiver),
+            _WITH_ENVIRONMENT_(env_of_t<_Receiver>),
+            _WITH_COMPLETION_SIGNATURES_(__completion_signatures_of_t<_Sender, env_of_t<_Receiver>>),
+            _WITH_TYPE_<
+              decltype(__detail::__try_completions<_Receiver>(
+                __declval<completion_signatures_of_t<_Sender, env_of_t<_Receiver>>*>()
+              ))>>{};
+        } else {
 
-        static_assert(sender_in<_Sender, env_of_t<_Receiver>>);
-        static_assert(__receiver_from<_Receiver, _Sender>);
-
-        using _TfxSender = __tfx_sender<_Sender, _Receiver>;
-        constexpr bool _NothrowTfxSender =
-          __nothrow_callable<transform_sender_t, _Sender, env_of_t<_Receiver>>;
+          using _TfxSender = __tfx_sender<_Sender, _Receiver>;
+          constexpr bool _NothrowTfxSender =
+            __nothrow_callable<transform_sender_t, _Sender, env_of_t<_Receiver>>;
 
 #if STDEXEC_ENABLE_EXTRA_TYPE_CHECKING()
-        static_assert(__type_check_arguments<_TfxSender, _Receiver>());
+          static_assert(__type_check_arguments<_TfxSender, _Receiver>());
 #endif
 
-        if constexpr (__with_static_member<_TfxSender, _Receiver>) {
-          using _Result = __static_member_result_t<_TfxSender, _Receiver>;
-          __check_operation_state<_Result>();
-          constexpr bool _Nothrow = _NothrowTfxSender
-                                 && noexcept(STDEXEC_REMOVE_REFERENCE(_TfxSender)::static_connect(
-                                   __declval<_TfxSender>(), __declval<_Receiver>()));
-          return __declfn<_Result, _Nothrow>();
-        } else if constexpr (__with_member<_TfxSender, _Receiver>) {
-          using _Result = __member_result_t<_TfxSender, _Receiver>;
-          __check_operation_state<_Result>();
-          constexpr bool _Nothrow = _NothrowTfxSender
-                                 && noexcept(__declval<_TfxSender>()
-                                               .connect(__declval<_Receiver>()));
-          return __declfn<_Result, _Nothrow>();
-        } else if constexpr (__with_co_await<_TfxSender, _Receiver>) {
-          using _Result = __call_result_t<__connect_awaitable_t, _TfxSender, _Receiver>;
-          return __declfn<_Result, false>();
-        } else if constexpr (__is_debug_env<env_of_t<_Receiver>>) {
-          using _Result = __debug::__debug_operation;
-          return __declfn<_Result, _NothrowTfxSender>();
-        } else {
-          return _NO_USABLE_CONNECT_CUSTOMIZATION_FOUND_<
-            _WITH_PRETTY_SENDER_<_TfxSender>,
-            _WITH_RECEIVER_(_Receiver)
-          >();
+          if constexpr (__with_static_member<_TfxSender, _Receiver>) {
+            using _Result = __static_member_result_t<_TfxSender, _Receiver>;
+            __check_operation_state<_Result>();
+            constexpr bool _Nothrow = _NothrowTfxSender
+                                  && noexcept(STDEXEC_REMOVE_REFERENCE(_TfxSender)::static_connect(
+                                    __declval<_TfxSender>(), __declval<_Receiver>()));
+            return __declfn<_Result, _Nothrow>();
+          } else if constexpr (__with_member<_TfxSender, _Receiver>) {
+            using _Result = __member_result_t<_TfxSender, _Receiver>;
+            __check_operation_state<_Result>();
+            constexpr bool _Nothrow = _NothrowTfxSender
+                                  && noexcept(__declval<_TfxSender>()
+                                                .connect(__declval<_Receiver>()));
+            return __declfn<_Result, _Nothrow>();
+          } else if constexpr (__with_co_await<_TfxSender, _Receiver>) {
+            using _Result = __call_result_t<__connect_awaitable_t, _TfxSender, _Receiver>;
+            return __declfn<_Result, false>();
+          } else if constexpr (__is_debug_env<env_of_t<_Receiver>>) {
+            using _Result = __debug::__debug_operation;
+            return __declfn<_Result, _NothrowTfxSender>();
+          } else {
+            return _NO_USABLE_CONNECT_CUSTOMIZATION_FOUND_<
+              _WITH_PRETTY_SENDER_<_TfxSender>,
+              _WITH_RECEIVER_(_Receiver)
+            >();
+          }
         }
       }
 

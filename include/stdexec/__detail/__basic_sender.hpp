@@ -339,8 +339,7 @@ namespace STDEXEC {
       template <receiver _Receiver>
       STDEXEC_ATTRIBUTE(nodiscard, always_inline)
       constexpr auto connect(_Receiver __rcvr) && noexcept(
-        __noexcept_of<__sexpr_impl<__tag_t>::connect, __sexpr, _Receiver>)
-        -> __result_of<__sexpr_impl<__tag_t>::connect, __sexpr, _Receiver> {
+        __noexcept_of<__sexpr_impl<__tag_t>::connect, __sexpr, _Receiver>) {
         return __sexpr_impl<__tag_t>::connect(
           static_cast<__sexpr&&>(*this), static_cast<_Receiver&&>(__rcvr));
       }
@@ -349,8 +348,7 @@ namespace STDEXEC {
         requires __std::copy_constructible<__sexpr>
       STDEXEC_ATTRIBUTE(nodiscard, always_inline)
       constexpr auto connect(_Receiver __rcvr) const & noexcept(
-        __noexcept_of<__sexpr_impl<__tag_t>::connect, __sexpr const &, _Receiver>)
-        -> __result_of<__sexpr_impl<__tag_t>::connect, __sexpr const &, _Receiver> {
+        __noexcept_of<__sexpr_impl<__tag_t>::connect, __sexpr const &, _Receiver>) {
         return __sexpr_impl<__tag_t>::connect(*this, static_cast<_Receiver&&>(__rcvr));
       }
 

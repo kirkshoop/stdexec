@@ -100,13 +100,8 @@ namespace exec {
         using __variant_t::swap;
 
         template <__decays_to<__t> _Self, receiver _Receiver>
-          requires(sender_to<__copy_cvref_t<_Self, STDEXEC::__t<_SenderIds>>, _Receiver> && ...)
         STDEXEC_EXPLICIT_THIS_BEGIN(auto connect)(this _Self&& __self, _Receiver __rcvr) noexcept((
-          __nothrow_connectable<__copy_cvref_t<_Self, STDEXEC::__t<_SenderIds>>, _Receiver> && ...))
-          -> STDEXEC::__t<__operation_state<
-            STDEXEC::__id<_Receiver>,
-            __cvref_id<_Self, STDEXEC::__t<_SenderIds>>...
-          >> {
+          __nothrow_connectable<__copy_cvref_t<_Self, STDEXEC::__t<_SenderIds>>, _Receiver> && ...)) {
           return std::visit(
             __visitor<_Self, _Receiver>{static_cast<_Receiver&&>(__rcvr)},
             static_cast<_Self&&>(__self).base());
