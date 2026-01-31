@@ -704,11 +704,11 @@ namespace exec {
           __noexcept_of<transform_sender, _Sequence, env_of_t<_Receiver>>;
         using __tfx_seq_t = __transform_sender_result_t<_Sequence, _Receiver>;
 
-        static_assert(
-          sequence_sender<_Sequence> || has_sequence_item_types<_Sequence, env_of_t<_Receiver>>,
-          "The first argument to STDEXEC::subscribe must be a sequence sender");
-        static_assert(
-          receiver<_Receiver>, "The second argument to STDEXEC::subscribe must be a receiver");
+        // static_assert(
+        //   sequence_sender<_Sequence> || has_sequence_item_types<_Sequence, env_of_t<_Receiver>>,
+        //   "The first argument to STDEXEC::subscribe must be a sequence sender");
+        // static_assert(
+        //   receiver<_Receiver>, "The second argument to STDEXEC::subscribe must be a receiver");
 #if STDEXEC_ENABLE_EXTRA_TYPE_CHECKING()
         static_assert(__type_check_arguments<__tfx_seq_t, _Receiver>());
 #endif

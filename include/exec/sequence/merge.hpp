@@ -131,8 +131,7 @@ namespace exec {
       struct __subscribe_fn {
         template <class _Receiver, class... _Sequences>
         auto operator()(_Receiver& __rcvr, __ignore, __ignore, _Sequences... __sequences)
-          noexcept(__nothrow_decay_copyable<_Sequences...>)
-            -> __t<__operation<__id<_Receiver>, _Sequences...>> {
+          noexcept(__nothrow_decay_copyable<_Sequences...>) {
           return __t<__operation<__id<_Receiver>, _Sequences...>>{
             static_cast<_Receiver&&>(__rcvr), static_cast<_Sequences&&>(__sequences)...};
         }
@@ -186,8 +185,7 @@ namespace exec {
 
       template <class _Self, receiver _Receiver>
       static auto subscribe(_Self&& __self, _Receiver __rcvr)
-        noexcept(__nothrow_applicable<__subscribe_fn, _Self, _Receiver&>)
-          -> __apply_result_t<__subscribe_fn, _Self, _Receiver&> {
+        noexcept(__nothrow_applicable<__subscribe_fn, _Self, _Receiver&>) {
         static_assert(sender_expr_for<_Self, merge_t>);
         return STDEXEC::__apply(__subscribe_fn{}, static_cast<_Self&&>(__self), __rcvr);
       }

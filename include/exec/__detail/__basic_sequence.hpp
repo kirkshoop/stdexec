@@ -65,9 +65,7 @@ namespace exec {
 
       template <class _Self, STDEXEC::receiver _Receiver>
       static auto subscribe(_Self&& __self, _Receiver&& __rcvr) noexcept(noexcept(
-        __self.__tag().subscribe(static_cast<_Self&&>(__self), static_cast<_Receiver&&>(__rcvr))))
-        -> decltype(__self.__tag()
-                      .subscribe(static_cast<_Self&&>(__self), static_cast<_Receiver&&>(__rcvr))) {
+        __self.__tag().subscribe(static_cast<_Self&&>(__self), static_cast<_Receiver&&>(__rcvr)))) {
         static_assert(STDEXEC::__decays_to_derived_from<_Self, __seqexpr>);
         return __tag_t::subscribe(static_cast<_Self&&>(__self), static_cast<_Receiver&&>(__rcvr));
       }

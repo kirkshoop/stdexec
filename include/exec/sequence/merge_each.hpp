@@ -170,12 +170,9 @@ namespace exec {
 
       template <class _Error>
         requires(!__std::same_as<_Error, _ErrorStorage>)
-      void
-        store_error(_Error&& __error) noexcept(__nothrow_callable<
-                                               decltype(&_ErrorStorage::template emplace<_Error>),
-                                               _ErrorStorage&,
-                                               _Error
-        >) {
+      void store_error(_Error&& __error)
+        noexcept(noexcept(__error_storage_
+                            ->template emplace<_Error>(static_cast<_Error&&>(__error)))) {
         if (this->nested_value_fail()) {
           // We are the first child to complete with an error, so we must save the error. (Any
           // subsequent errors are ignored.)
